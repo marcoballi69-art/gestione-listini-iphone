@@ -1,0 +1,23 @@
+GESTIONE LISTINI IPHONE — PRIMA REVISIONE INTERFACCIA
+
+BASE DI PARTENZA
+- Derivata dal pacchetto V.24 fornito dall’utente.
+- La logica applicativa e i file originali di gestione, scanner, archivio e documenti sono mantenuti.
+- Questa cartella è una copia di sviluppo separata: non modifica il repository V.24 originale.
+
+INTERFACCIA IPHONE
+- Navigazione principale in tre aree: Lavoro, Archivio, Altro.
+- Lavoro raccoglie cliente/reparto, scansione e ricerca articoli, selezione, salvataggio e creazione documento.
+- Archivio mostra le selezioni salvate e consente di riaprirle per modificare metri e note o rigenerare i documenti.
+- Altro raccoglie backup, importazione listini e impostazioni.
+- Comandi e aree di selezione sono dimensionati per l’uso touch; la lista articoli selezionati resta scorrevole.
+- Riaprendo una selezione dall’archivio, l’app torna automaticamente all’area Lavoro.
+
+DA VERIFICARE SU IPHONE
+- Installazione da Safari tramite Aggiungi alla schermata Home.
+- Permesso fotocamera e lettura di codici a barre.
+- Anteprima/stampa PDF e preparazione email.
+- Comportamento offline dopo il primo caricamento completo.
+
+NOTA
+Questa revisione riorganizza l’interfaccia; non dichiara ancora collaudate le funzioni su un iPhone fisico.
