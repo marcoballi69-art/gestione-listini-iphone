@@ -29,6 +29,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .row>*{flex:1;min-width:130px}
 .status{font-size:.9rem;padding:10px 12px;border-radius:10px;background:#e8f1fb;margin-top:9px}
 .status.off{background:#fff1d6;color:#754c00}
+.status.scan-error{background:#fee2e2;color:#991b1b;border:1px solid #f3b4b4;font-weight:700}
 .status.on{background:#e5f6eb;color:#176438}
 .hidden{display:none!important}
 .article,.item{padding:12px 0;border-bottom:1px solid #e5eaf0}
@@ -39,11 +40,6 @@ button:disabled{opacity:.5;cursor:not-allowed}
 #reader video{width:100%;max-width:292px;height:170px;max-height:26vh;min-height:145px;object-fit:contain;border-radius:12px;display:block;margin:auto}
 #results{max-height:42vh;overflow-y:auto;-webkit-overflow-scrolling:touch;border-top:1px solid #e5eaf0;margin-top:10px;padding:0 8px}
 #choiceItems{max-height:340px;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 10px;border:1px solid #e5eaf0;border-radius:12px}
-#recentScanItems{max-height:230px;overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:8px}
-.recent-scan{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:9px 2px;border-bottom:1px solid #e5eaf0}
-.recent-scan-info{min-width:0;flex:1}
-.recent-scan-info strong{display:block;overflow-wrap:anywhere}
-.recent-scan button{margin:0;min-width:88px;padding:9px 11px;min-height:40px}
 .scan-found{font-weight:750;color:#176438}
 .pill{display:inline-block;padding:4px 9px;border-radius:20px;background:#edf2f7;font-size:.78rem}
 .note{background:#fff8e8;border-radius:10px;padding:10px;color:#76551a;font-size:.88rem}
@@ -101,7 +97,8 @@ input,select,textarea{min-height:50px;font-size:1rem}
 .phone-nav{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;position:sticky;top:8px;z-index:50;margin:0 0 12px;padding:7px;background:#fff;border:1px solid #dce5ef;border-radius:16px;box-shadow:0 5px 18px #173b5d12}
 .nav-tab{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;margin:0;min-height:56px;padding:6px;background:transparent;color:#52657b;font-size:.86rem;border-radius:12px}
 .nav-tab .nav-symbol{font-size:1.2rem;line-height:1.2;font-weight:800}
-.nav-tab.active{background:#e8f1fb;color:#174f86}
+.nav-tab{background:#dce9f7;color:#174f86;border:1px solid #b7cce3}
+.nav-tab.active{background:#174f86;color:#fff;border-color:#174f86;box-shadow:0 3px 10px #174f8640}
 .panel[data-screen].screen-hidden{display:none!important}
 .panel[data-screen="work"] h2{font-size:1.12rem}
 #choiceItems{max-height:42vh;min-height:70px}
@@ -135,7 +132,6 @@ input,select,textarea{min-height:50px;font-size:1rem}
  #reader video{min-height:190px}
  #results{max-height:34vh}
  #choiceItems{max-height:42vh}
- #recentScanItems{max-height:180px}
  #archivePanel .saved-actions{grid-template-columns:1fr}
  #documentPanel .row{display:grid;grid-template-columns:1fr}
  #documentPanel .row button{width:100%}
@@ -183,7 +179,7 @@ input,select,textarea{min-height:50px;font-size:1rem}
   <div class="row"><button id="startScan" class="success">Apri fotocamera e scansiona</button></div>
   <p class="muted">Inquadra il codice a barre intero, in orizzontale e ben illuminato. Premi di nuovo il pulsante per chiudere lo scanner.</p>
   <div id="reader" class="hidden"></div><div id="scanMessage" class="status">Scanner non avviato.</div>
-  <div id="recentScanItems"></div><div id="results"></div>
+  <div id="results"></div>
 </section>
 <section class="panel" data-screen="work" id="itemsPanel">
   <h2>La tua selezione</h2><div class="row"><div><label for="choiceDate">Data</label><input id="choiceDate" type="date"></div>

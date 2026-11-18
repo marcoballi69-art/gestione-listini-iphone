@@ -362,29 +362,10 @@ async function renderSaved() {
 }
 
 
-function rememberRecentScan(a) {
-  recentScans = recentScans.filter(x => codeKey(x.code) !== codeKey(a.code));
-  recentScans.unshift({ code:a.code, name:a.name, price:a.price, currency:a.currency || "EUR" });
-  recentScans = recentScans.slice(0,3); renderRecentScans();
-}
-function renderRecentScans() {
-  const host=$("recentScanItems"); if (!host) return; host.replaceChildren();
-  if (!recentScans.length) return;
-  const heading=document.createElement("div"); heading.className="muted"; heading.textContent="Ultimi 3 articoli scansionati"; host.append(heading);
-  recentScans.forEach(a=>{
-    const row=document.createElement("div"); row.className="recent-scan";
-    const info=document.createElement("div"); info.className="recent-scan-info";
-    const name=document.createElement("strong"); name.textContent=a.name;
-    const price=document.createElement("div"); price.className="price"; price.textContent=priceText(a);
-    info.append(name,price);
-    const del=document.createElement("button"); del.className="danger"; del.textContent="Cancella";
-    del.onclick=()=>{ const i=currentItems.findIndex(x=>x.code && codeKey(x.code)===codeKey(a.code));
-      if(i>=0) currentItems.splice(i,1);
-      recentScans=recentScans.filter(x=>codeKey(x.code)!==codeKey(a.code));
-      renderChoice(); autosaveDraft(); renderRecentScans(); };
-    row.append(info,del); host.append(row);
-  });
-}
+// Gli articoli letti vengono mostrati una sola volta nella selezione sottostante.
+// Manteniamo queste funzioni vuote per compatibilità con i richiami storici.
+function rememberRecentScan(a) { /* visualizzazione unica in Articoli selezionati */ }
+function renderRecentScans() { /* elenco duplicato rimosso dall'interfaccia */ }
 
 /* INSERIMENTO MANUALE */
 async function addManual() {
@@ -533,9 +514,6 @@ function scannerMatchKey(value) {
 async function onBarcode(code) {
   const scanned = normalizeBarcodeCode(code);
   const scannedKey = scannerMatchKey(scanned);
-  // Cerca prima nell'archivio normalmente usato dall'app; usa anche le righe
-  // del PDF attivo e l'anteprima come fonti di riserva, senza dipendere dal
-  // fatto che IndexedDB e il riepilogo del PDF siano perfettamente allineati.
   const sources = [
     ...(Array.isArray(articles) ? articles : []),
     ...(activeListino && Array.isArray(activeListino.rows) ? activeListino.rows : []),
@@ -545,22 +523,27 @@ async function onBarcode(code) {
     const storedKey = scannerMatchKey(x && x.code);
     return storedKey !== "" && scannedKey !== "" && storedKey === scannedKey;
   });
+  const scanStatus = $("scanMessage");
   if (a) {
     if (!await ensureCustomer()) {
-      message("scanMessage", "CODICE LETTO: " + scanned + " — ARTICOLO: " + a.name + " — " + priceText(a) + ". Seleziona prima il cliente per aggiungerlo alla scelta.");
+      if (scanStatus) scanStatus.className = "status off";
+      message("scanMessage", "Codice letto: " + scanned + ". Seleziona prima il cliente.");
       return;
     }
     const added = addArticle(a);
-    if (added) rememberRecentScan(a);
-    beep(); vibrateScan();
-    message("scanMessage", (added ? "TROVATO: " : "GIÀ PRESENTE: ") + a.name + " — " + priceText(a) + " (codice " + scanned + ")");
+    if (added) {
+      rememberRecentScan(a);
+      if (scanStatus) scanStatus.className = "status on";
+      beep(); vibrateScan();
+      message("scanMessage", "ARTICOLO AGGIUNTO: " + a.name + " — " + priceText(a));
+    } else {
+      if (scanStatus) scanStatus.className = "status scan-error";
+      message("scanMessage", "ARTICOLO GIÀ PRESENTE nella selezione: " + a.name + ". Nessun nuovo inserimento.");
+    }
     return;
   }
-  // Codice non presente: ripristina il messaggio semplice della versione
-  // iniziale. Nessun bip e nessuna evidenziazione di errore in rosso.
-  const scanStatus = $("scanMessage");
-  if (scanStatus) scanStatus.className = "status";
-  message("scanMessage", "Articolo non in listino. Scrivere l'articolo a mano.");
+  if (scanStatus) scanStatus.className = "status scan-error";
+  message("scanMessage", "ARTICOLO NON IN LISTINO: " + scanned + ". Puoi inserirlo manualmente.");
   $("manualAdd").classList.remove("hidden");
   $("manualName").value = ""; $("manualQty").value = ""; $("manualName").focus();
 }
@@ -588,17 +571,74 @@ async function importCsv() {
     message("importMessage", "Listino " + file.name + ": " + n + " articoli importati o aggiornati.");}
   catch(e){message("importMessage","Errore CSV: "+e.message);}
 }
+function excelHeaderKey(value) {
+  return norm(String(value == null ? "" : value))
+    .replace(/[àá]/g,"a").replace(/[èé]/g,"e").replace(/[ì]/g,"i").replace(/[ò]/g,"o").replace(/[ù]/g,"u")
+    .replace(/[^a-z0-9]/g, "");
+}
+function findExcelHeader(headers, aliases) {
+  const keys = aliases.map(excelHeaderKey);
+  return headers.findIndex(h => keys.includes(excelHeaderKey(h)));
+}
+function excelCell(row, index) {
+  return index >= 0 && row[index] != null ? String(row[index]).trim() : "";
+}
+function parseFlexibleExcel(data) {
+  // Individua la riga intestazioni anche se il foglio contiene titolo e righe vuote sopra.
+  let headerRow = -1, headers = [], map = null, best = 0;
+  const aliases = {
+    code: ["codice", "codice articolo", "codicearticolo", "code", "barcode", "ean", "ean13", "articolo codice"],
+    name: ["articolo", "nome articolo", "nomearticolo", "descrizione", "descrizione articolo", "nome", "item", "product", "prodotto"],
+    price: ["prezzo", "prezzo unitario", "prezzounitario", "price", "valore", "euro"],
+    composition: ["composizione", "composition", "materiale", "composizione articolo"],
+    weight: ["peso", "weight", "grammi", "gr/mq", "grmq"],
+    height: ["altezze", "altezza", "height", "misure", "altezza cm"],
+    fullDescription: ["dettagli", "dettagli originali", "descrizione completa", "note articolo", "specifiche", "full description"]
+  };
+  for (let i=0; i<Math.min(data.length,20); i++) {
+    const row = data[i] || [];
+    const candidate = {};
+    for (const [field, names] of Object.entries(aliases)) candidate[field] = findExcelHeader(row, names);
+    const score = Object.values(candidate).filter(v => v >= 0).length;
+    if (candidate.name >= 0 && candidate.code >= 0 && score > best) {
+      best=score; headerRow=i; headers=row.map(v=>String(v==null?"":v).trim()); map=candidate;
+    }
+  }
+  if (headerRow < 0) throw new Error("Non trovo le intestazioni CODICE e ARTICOLO. Inserisci i nomi delle colonne nella riga di intestazione.");
+  const rows=[];
+  for (const row of data.slice(headerRow+1)) {
+    if (!row || !row.some(v=>String(v==null?"":v).trim())) continue;
+    const code=excelCell(row,map.code), name=excelCell(row,map.name);
+    if (!code || !name) continue;
+    const originalFields={columns:row, headers};
+    for (const field of ["composition","weight","height","fullDescription"]) {
+      const value=excelCell(row,map[field]); if(value) originalFields[field]=value;
+    }
+    // Conserva anche le altre colonne non vuote, senza imporre un modello fisso.
+    const extras=[];
+    row.forEach((value,i)=>{const v=String(value==null?"":value).trim();if(v){extras.push({label:headers[i]||("Colonna "+(i+1)),value:v});}});
+    originalFields.extras=extras;
+    const price=excelCell(row,map.price);
+    rows.push({code,name,currency:"EUR",price:price.replace(",","."),originalFields});
+  }
+  return rows;
+}
 async function importExcel() {
   const file=$("excelFile").files[0];if(!file){alert("Seleziona un file Excel.");return;}
   if(!window.XLSX){message("importMessage","Lettore Excel non disponibile. Apri l'app online una volta.");return;}
-  try{const workbook=XLSX.read(await file.arrayBuffer(),{type:"array"}),sheet=workbook.Sheets[workbook.SheetNames[0]];
-    const data=XLSX.utils.sheet_to_json(sheet,{header:1,defval:""});
-    const rows=data.filter(r=>r.length>=2&&r[0]&&r[1]).map(r=>({code:String(r[0]).trim(),name:String(r[1]).trim(),currency:"EUR",
-      price:String(r[3]||r[2]||"").replace(",", "."),originalFields:{columns:r}}));
-    if(!rows.length)throw new Error("Nessun articolo riconosciuto.");const n=await mergeArticles(rows);
+  try{
+    const workbook=XLSX.read(await file.arrayBuffer(),{type:"array"});
+    let rows=[];
+    // Prova i fogli in ordine: usa il primo che contiene intestazioni e articoli validi.
+    for(const sheetName of workbook.SheetNames){
+      const data=XLSX.utils.sheet_to_json(workbook.Sheets[sheetName],{header:1,defval:""});
+      try{rows=parseFlexibleExcel(data);if(rows.length)break;}catch(e){/* prova il foglio successivo */}
+    }
+    if(!rows.length)throw new Error("Nessun articolo riconosciuto. Verifica che ci siano le colonne CODICE e ARTICOLO.");
+    const n=await mergeArticles(rows);
     activeListino=null;await removeRecord("meta","activeListino");localStorage.setItem("gestioneListiniNomeFile",file.name);refreshListinoInfo();
-    message("importMessage", "Listino " + file.name + ": " + n + " articoli importati o aggiornati.");}
-  catch(e){message("importMessage","Errore Excel: "+e.message);}
+    message("importMessage", "Listino " + file.name + ": " + n + " articoli importati o aggiornati. Le colonne riconosciute sono state associate automaticamente.");
+  } catch(e){message("importMessage","Errore Excel: "+e.message);}
 }
 
 /* PDF / OCR */
@@ -696,12 +736,23 @@ function optionalMeters(item) {
 }
 function itemOriginalDetails(item) {
   const f = item.originalFields || {};
-  return [f.composition, f.weight, f.height, f.fullDescription]
-    .filter(v => typeof v === "string" && v.trim())
-    .filter((v, i, arr) => arr.findIndex(x => norm(x) === norm(v)) === i)
-    .filter(v => !norm(item.name) || !norm(v).includes(norm(item.name)))
-    .join(" · ");
+  const parts = [];
+  const add = (label, value) => { const v=String(value==null?"":value).trim(); if(v && !parts.some(x=>norm(x)===norm(label+": "+v))) parts.push(label+": "+v); };
+  add("Composizione", f.composition);
+  add("Peso", f.weight);
+  add("Altezze", f.height);
+  add("Dettagli", f.fullDescription);
+  // Le colonne aggiuntive dell'Excel vengono riportate con la propria intestazione.
+  if (Array.isArray(f.extras)) f.extras.forEach(x => {
+    const label=String(x && x.label || "").trim(), value=String(x && x.value || "").trim();
+    if(label && value && !["codice","articolo","nome articolo","prezzo"].includes(excelHeaderKey(label))) add(label,value);
+  });
+  if (!parts.length && Array.isArray(f.columns) && Array.isArray(f.headers)) {
+    f.columns.forEach((v,i)=>{const label=String(f.headers[i]||"").trim();if(label&&String(v||"").trim())add(label,v);});
+  }
+  return parts.join(" · ");
 }
+
 function buildDocumentHtml() {
   const c = choicePayload();
   let rows = "";

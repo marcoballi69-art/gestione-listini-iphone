@@ -1,23 +1,22 @@
-GESTIONE LISTINI IPHONE — PRIMA REVISIONE INTERFACCIA
+GESTIONE LISTINI IPHONE — REVISIONE 2
 
 BASE DI PARTENZA
-- Derivata dal pacchetto V.24 fornito dall’utente.
-- La logica applicativa e i file originali di gestione, scanner, archivio e documenti sono mantenuti.
-- Questa cartella è una copia di sviluppo separata: non modifica il repository V.24 originale.
+- Copia di sviluppo separata, derivata dal pacchetto V.24 e dalla prima interfaccia mobile.
+- Non modifica il repository gestione-listini-test né la versione V.24 considerata stabile.
 
-INTERFACCIA IPHONE
-- Navigazione principale in tre aree: Lavoro, Archivio, Altro.
-- Lavoro raccoglie cliente/reparto, scansione e ricerca articoli, selezione, salvataggio e creazione documento.
-- Archivio mostra le selezioni salvate e consente di riaprirle per modificare metri e note o rigenerare i documenti.
-- Altro raccoglie backup, importazione listini e impostazioni.
-- Comandi e aree di selezione sono dimensionati per l’uso touch; la lista articoli selezionati resta scorrevole.
-- Riaprendo una selezione dall’archivio, l’app torna automaticamente all’area Lavoro.
+MODIFICHE IN QUESTA REVISIONE
+1. Scanner: rimossa la lista separata degli ultimi tre articoli letti. Gli articoli aggiunti compaiono una sola volta nella lista Articoli selezionati.
+2. Scanner: lettura valida e nuovo inserimento = messaggio verde, suono e vibrazione. Articolo già presente = messaggio rosso, senza suono. Codice non presente nel listino = messaggio rosso distinto e possibilità di inserimento manuale.
+3. Navigazione: i pulsanti Lavoro, Archivio e Altro hanno colori più evidenti; la sezione attiva è blu scuro con testo bianco.
+4. PDF/email: quando si seleziona “Includi i dettagli originali”, i dettagli vengono presentati con etichette (ad esempio “Peso: 480” e “Altezze: 150/148”), invece di una sequenza di valori senza nome.
+5. Excel: l'importazione cerca le intestazioni anche se ci sono titolo o righe vuote sopra. Associa automaticamente colonne come CODICE, ARTICOLO/NOME ARTICOLO, PREZZO, COMPOSIZIONE, PESO e ALTEZZE anche se sono in posizioni diverse. Conserva anche le altre colonne valorizzate con la loro intestazione, per riportarle nei dettagli del PDF/email.
 
-DA VERIFICARE SU IPHONE
-- Installazione da Safari tramite Aggiungi alla schermata Home.
-- Permesso fotocamera e lettura di codici a barre.
-- Anteprima/stampa PDF e preparazione email.
-- Comportamento offline dopo il primo caricamento completo.
+NOTE E LIMITI
+- Per associare correttamente un articolo al codice a barre, il foglio Excel deve avere una colonna CODICE e una colonna ARTICOLO (o NOME ARTICOLO / DESCRIZIONE).
+- Le intestazioni devono essere presenti nella stessa riga; possono esserci righe di titolo o vuote prima.
+- Il lettore Excel usa la prima scheda che contiene una tabella riconoscibile.
+- La revisione è preparata ma va provata nell'app online, soprattutto con il file Excel di esempio e con un listino reale. Non considerarla ancora collaudata su tutti i formati Excel o su tutti i telefoni.
 
-NOTA
-Questa revisione riorganizza l’interfaccia; non dichiara ancora collaudate le funzioni su un iPhone fisico.
+INSTALLAZIONE
+- Caricare il contenuto dello ZIP nel repository separato gestione-listini-iphone, sostituendo i file della sola copia di sviluppo.
+- Non caricare questo ZIP nel repository gestione-listini-test (V.24 stabile).
