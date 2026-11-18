@@ -29,7 +29,8 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .row>*{flex:1;min-width:130px}
 .status{font-size:.9rem;padding:10px 12px;border-radius:10px;background:#e8f1fb;margin-top:9px}
 .status.off{background:#fff1d6;color:#754c00}
-.status.scan-error{background:#fee2e2;color:#991b1b;border:1px solid #f3b4b4;font-weight:700}
+.status.scan-error,.status.scan-missing{background:#fee2e2;color:#991b1b;border:1px solid #f3b4b4;font-weight:700}
+.status.scan-duplicate{background:#fff2cc;color:#805600;border:1px solid #e8c76a;font-weight:700}
 .status.on{background:#e5f6eb;color:#176438}
 .hidden{display:none!important}
 .article,.item{padding:12px 0;border-bottom:1px solid #e5eaf0}
@@ -250,8 +251,8 @@ input,select,textarea{min-height:50px;font-size:1rem}
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="./scanner/html5-qrcode.min.js"></script>
-<script src="./app.js"></script>
+<script src="./scanner/html5-qrcode.min.js?v=17"></script>
+<script src="./app.js?v=17"></script>
 
 <script>
 (function(){

@@ -1,5 +1,5 @@
 "use strict";
-const CACHE_NAME = "gestione-listini-iphone-v1";
+const CACHE_NAME = "gestione-listini-iphone-v2";
 const APP_FILES = ["./","./index.html","./app.js","./manifest.webmanifest","./README.txt","./LEGGIMI.txt","./scanner/index.html","./scanner/html5-qrcode.min.js"];
 const EXTERNAL_FILES = [
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js",
@@ -20,20 +20,42 @@ self.addEventListener("install", event => {
   })());
 });
 self.addEventListener("activate",event=>{
-  event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith("gestione-listini-")&&key!==CACHE_NAME).map(key=>caches.delete(key)))).then(()=>self.clients.claim()));
+  event.waitUntil(caches.keys()
+    .then(keys=>Promise.all(keys.filter(key=>key.startsWith("gestione-listini-")&&key!==CACHE_NAME).map(key=>caches.delete(key))))
+    .then(()=>self.clients.claim()));
 });
 self.addEventListener("fetch",event=>{
-  const request=event.request;if(request.method!=="GET")return;
+  const request=event.request;
+  if(request.method!=="GET")return;
   const url=new URL(request.url);
   if(url.origin!==self.location.origin){
     event.respondWith(caches.match(request).then(cached=>cached||fetch(request).then(response=>{
-      if(response&&(response.ok||response.type==="opaque")){const copy=response.clone();caches.open(CACHE_NAME).then(cache=>cache.put(request,copy).catch(()=>{}));}
+      if(response&&(response.ok||response.type==="opaque")){
+        const copy=response.clone();
+        caches.open(CACHE_NAME).then(cache=>cache.put(request,copy).catch(()=>{}));
+      }
       return response;
     }).catch(()=>new Response("Risorsa non disponibile offline.",{status:503,statusText:"Offline"}))));
     return;
   }
+  // Per HTML e file dell'app prova prima la rete: la cache resta fallback offline.
+  const appShell = request.mode==="navigate" || /\.(?:html|js|css)$/.test(url.pathname);
+  if(appShell){
+    event.respondWith(fetch(request,{cache:"no-cache"}).then(response=>{
+      if(response&&response.ok){
+        const copy=response.clone();
+        caches.open(CACHE_NAME).then(cache=>cache.put(request,copy).catch(()=>{}));
+      }
+      return response;
+    }).catch(()=>caches.match(request).then(cached=>cached ||
+      (request.mode==="navigate"?caches.match("./index.html"):new Response("File non disponibile offline.",{status:503,statusText:"Offline"})))));
+    return;
+  }
   event.respondWith(caches.match(request).then(cached=>cached||fetch(request).then(response=>{
-    if(response&&response.ok){const copy=response.clone();caches.open(CACHE_NAME).then(cache=>cache.put(request,copy).catch(()=>{}));}
+    if(response&&response.ok){
+      const copy=response.clone();
+      caches.open(CACHE_NAME).then(cache=>cache.put(request,copy).catch(()=>{}));
+    }
     return response;
-  }).catch(()=>request.mode==="navigate"?caches.match("./index.html"):new Response("File non disponibile offline.",{status:503,statusText:"Offline"}))));
+  }).catch(()=>new Response("File non disponibile offline.",{status:503,statusText:"Offline"}))));
 });

@@ -46,7 +46,14 @@ function removeRecord(name, key) {
 function norm(v) {
   return String(v || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 }
-function codeKey(v) { return String(v || "").trim().replace(/^0+(?=\d)/, ""); }
+function codeKey(v) {
+  let key = String(v == null ? "" : v).normalize("NFKC")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .trim().replace(/[\s\u00A0-]/g, "").toUpperCase();
+  if (/^\d+[.,]0+$/.test(key)) key = key.replace(/[.,]0+$/, "");
+  if (/^\d+$/.test(key)) key = key.replace(/^0+(?=\d)/, "");
+  return key;
+}
 function priceText(a) {
   if (a.price === "" || a.price == null || !Number.isFinite(Number(a.price))) return "Prezzo non indicato";
   return "€ " + Number(a.price).toFixed(2).replace(".", ",");
@@ -198,6 +205,15 @@ function addArticle(a) {
 
 /* SCELTA ARTICOLI */
 function renderChoice() {
+  // Ripulisce anche le selezioni già salvate con doppioni creati da versioni precedenti.
+  const seenCodes = new Set();
+  currentItems = currentItems.filter(item => {
+    if (!item || !item.code) return true; // gli articoli manuali non hanno codice
+    const key = codeKey(item.code);
+    if (!key || seenCodes.has(key)) return false;
+    seenCodes.add(key);
+    return true;
+  });
   const host = $("choiceItems"); host.replaceChildren();
   if (!currentItems.length) { host.textContent = t("Nessun articolo selezionato."); renderRecentScans(); applyLanguage(); return; }
   currentItems.forEach((item,index) => {
@@ -537,12 +553,12 @@ async function onBarcode(code) {
       beep(); vibrateScan();
       message("scanMessage", "ARTICOLO AGGIUNTO: " + a.name + " — " + priceText(a));
     } else {
-      if (scanStatus) scanStatus.className = "status scan-error";
+      if (scanStatus) scanStatus.className = "status scan-duplicate";
       message("scanMessage", "ARTICOLO GIÀ PRESENTE nella selezione: " + a.name + ". Nessun nuovo inserimento.");
     }
     return;
   }
-  if (scanStatus) scanStatus.className = "status scan-error";
+  if (scanStatus) scanStatus.className = "status scan-missing";
   message("scanMessage", "ARTICOLO NON IN LISTINO: " + scanned + ". Puoi inserirlo manualmente.");
   $("manualAdd").classList.remove("hidden");
   $("manualName").value = ""; $("manualQty").value = ""; $("manualName").focus();
@@ -747,8 +763,16 @@ function itemOriginalDetails(item) {
     const label=String(x && x.label || "").trim(), value=String(x && x.value || "").trim();
     if(label && value && !["codice","articolo","nome articolo","prezzo"].includes(excelHeaderKey(label))) add(label,value);
   });
-  if (!parts.length && Array.isArray(f.columns) && Array.isArray(f.headers)) {
-    f.columns.forEach((v,i)=>{const label=String(f.headers[i]||"").trim();if(label&&String(v||"").trim())add(label,v);});
+  // Usa anche le colonne originali: versioni precedenti potevano salvare
+  // i valori grezzi senza popolare extras o soltanto alcuni campi riconosciuti.
+  if (Array.isArray(f.columns) && Array.isArray(f.headers)) {
+    f.columns.forEach((v,i)=>{
+      const label=String(f.headers[i]||"").trim();
+      if(label && String(v==null?"":v).trim() &&
+         !["codice","codice articolo","articolo","nome articolo","prezzo","prezzo unitario"].includes(excelHeaderKey(label))) {
+        add(label,v);
+      }
+    });
   }
   return parts.join(" · ");
 }
@@ -1204,6 +1228,6 @@ document.addEventListener("visibilitychange",async()=>{if(document.visibilitySta
       else{$("authGate").classList.remove("hidden");$("passwordLogin").classList.remove("hidden");}
     }else{$("authGate").classList.remove("hidden");$("passwordSetup").classList.remove("hidden");}
     newChoice();
-    if("serviceWorker"in navigator){try{await navigator.serviceWorker.register("./sw.js?v=16");}catch(e){console.warn("Service worker non registrato",e);}}
+    if("serviceWorker"in navigator){try{await navigator.serviceWorker.register("./sw.js?v=17");}catch(e){console.warn("Service worker non registrato",e);}}
   }catch(e){alert("Errore inizializzazione archivio: "+e.message);}
 })();
