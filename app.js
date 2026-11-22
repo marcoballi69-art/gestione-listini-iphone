@@ -1,9 +1,9 @@
 "use strict";
 
 const DB_NAME = "gestione-listini-offline";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 let db, articles = [], currentItems = [], currentChoiceId = null;
-let scanner = null, lastScan = "", pdfPreviewRows = [], activeListino = null, idleTimer = null;
+let scanner = null, lastScan = "", pdfPreviewRows = [], activeListino = null, idleTimer = null, lastUnknownCode = "";
 let currentLanguage = "it";
 let recentScans = [], scanBusy = false, lastScanAt = 0, audioContext = null;
 let screenWakeLock = null;
@@ -17,6 +17,7 @@ function openDb() {
       if (!d.objectStoreNames.contains("articles")) d.createObjectStore("articles", { keyPath: "code" });
       if (!d.objectStoreNames.contains("choices")) d.createObjectStore("choices", { keyPath: "id" });
       if (!d.objectStoreNames.contains("meta")) d.createObjectStore("meta", { keyPath: "key" });
+      if (!d.objectStoreNames.contains("productArchive")) d.createObjectStore("productArchive", { keyPath: "code" });
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -55,7 +56,7 @@ function codeKey(v) {
   return key;
 }
 function priceText(a) {
-  if (a.price === "" || a.price == null || !Number.isFinite(Number(a.price))) return "Prezzo non indicato";
+  if (a.price === "" || a.price == null || !Number.isFinite(Number(a.price))) return a && a.archiveEntry ? "PREZZO ASSENTE" : "Prezzo non indicato";
   return "€ " + Number(a.price).toFixed(2).replace(".", ",");
 }
 function status() {
@@ -178,19 +179,32 @@ function showSelectedImportFile(inputId, labelId, fallback) {
   const file = $(inputId).files && $(inputId).files[0];
   $(labelId).textContent = file ? "File selezionato: " + file.name : fallback;
 }
-function renderResults() {
-  const query = norm($("search").value), host = $("results");
-  host.replaceChildren();
-  const found = articles.filter(a => !query || norm(a.name).includes(query) || String(a.code).includes(query))
-    .sort((a,b) => String(a.name || "").localeCompare(String(b.name || ""), "it", { sensitivity:"base", numeric:true }));
-  if (!found.length) { host.textContent = t("Nessun articolo trovato."); applyLanguage(); return; }
-  found.forEach(a => {
-    const div = document.createElement("div"); div.className = "article";
-    const name = document.createElement("strong"); name.textContent = a.name;
-    const details = document.createElement("div"); details.className = "price"; details.textContent = t("Codice ") + a.code + " · " + priceText(a);
-    const button = document.createElement("button"); button.textContent = "Aggiungi alla scelta";
-    button.onclick = async () => { if (await ensureCustomer()) addArticle(a); };
-    div.append(name, details, button); host.append(div);
+async function archiveAsArticle(entry) {
+  const base = articles.find(a => norm(a.name) === norm(entry.baseName));
+  const variant = normalizeVariantLabel(entry.variant || "");
+  return { code:entry.code, name:entry.baseName + (variant ? " — " + variant : ""),
+    price:base && base.price != null ? base.price : "", currency:(base && base.currency)||"EUR",
+    originalFields:(base && base.originalFields)||{}, archiveEntry:true, baseName:entry.baseName, variant };
+}
+function normalizeVariantLabel(value) {
+  const raw=String(value||"").trim(), m=raw.match(/^(?:S\.?\s*|SERIE\s*)(\d+[A-Za-z]?)$/i);
+  return m ? "SERIE "+m[1].toUpperCase() : raw;
+}
+async function renderResults() {
+  const query=norm($("search").value), host=$("results"); host.replaceChildren();
+  const archive=await all("productArchive"), archiveArticles=await Promise.all(archive.map(archiveAsArticle));
+  const found=[...articles,...archiveArticles]
+    .filter((a,i,arr)=>arr.findIndex(x=>codeKey(x.code)===codeKey(a.code))===i)
+    .filter(a=>!query||norm(a.name).includes(query)||String(a.code).includes(query))
+    .sort((a,b)=>String(a.name||"").localeCompare(String(b.name||""),"it",{sensitivity:"base",numeric:true}));
+  if(!found.length){host.textContent=t("Nessun articolo trovato.");applyLanguage();return;}
+  found.forEach(a=>{
+    const div=document.createElement("div");div.className="article";
+    const name=document.createElement("strong");name.textContent=a.name;
+    const details=document.createElement("div");details.className="price";details.textContent=t("Codice ")+a.code+" · "+priceText(a)+(a.archiveEntry?" · Archivio articoli":"");
+    const button=document.createElement("button");button.textContent="Aggiungi alla scelta";
+    button.onclick=async()=>{if(await ensureCustomer())addArticle(a);};
+    div.append(name,details,button);host.append(div);
   });
   applyLanguage();
 }
@@ -199,8 +213,37 @@ function addArticle(a) {
     message("scanMessage", "Articolo già presente nella scelta: " + a.name + " — " + priceText(a));
     return false;
   }
-  currentItems.push({ code:a.code, name:a.name, price:a.price, currency:a.currency || "EUR", quantity:"", quantitySet:false, note:"", originalFields:a.originalFields || {}, manual:false });
+  currentItems.push({ code:a.code, name:a.name, price:a.price, currency:a.currency || "EUR", quantity:"", quantitySet:false, note:"", originalFields:a.originalFields || {}, manual:false, archiveEntry:!!a.archiveEntry, baseName:a.baseName||"", variant:a.variant||"" });
   renderChoice(); autosaveDraft(); return true;
+}
+
+
+
+/* ARCHIVIO PERMANENTE DI ARTICOLI E VARIANTI */
+async function renderProductArchive() {
+  const host=$("productArchiveList"); if(!host)return;
+  const rows=(await all("productArchive")).sort((a,b)=>(a.baseName+" "+a.variant).localeCompare(b.baseName+" "+b.variant,"it",{numeric:true,sensitivity:"base"}));
+  host.replaceChildren();
+  if(!rows.length){host.textContent="Nessun articolo ancora archiviato.";return;}
+  rows.forEach(entry=>{
+    const row=document.createElement("div");row.className="article";
+    const title=document.createElement("strong");title.textContent=entry.baseName+" — "+normalizeVariantLabel(entry.variant);
+    const info=document.createElement("div");info.className="price";info.textContent="Codice "+entry.code;
+    const del=document.createElement("button");del.className="danger";del.textContent="Elimina";
+    del.onclick=async()=>{if(confirm("Eliminare questa variante dall’archivio permanente?")){await removeRecord("productArchive",entry.code);await renderProductArchive();await renderResults();}};
+    row.append(title,info,del);host.append(row);
+  });
+}
+async function addProductArchiveEntry() {
+  const baseName=$("archiveBaseName").value.trim(), variant=normalizeVariantLabel($("archiveVariant").value), code=$("archiveCode").value.trim();
+  if(!baseName||!variant||!code){message("productArchiveMessage","Inserisci nome articolo, serie/disegno e codice.");return;}
+  const existing=await getValue("productArchive",code);
+  if(existing&&!confirm("Questo codice è già presente. Vuoi sostituire la sua associazione?"))return;
+  await put("productArchive",{code,baseName,variant,updatedAt:new Date().toISOString()});
+  $("archiveBaseName").value="";$("archiveVariant").value="";$("archiveCode").value="";
+  lastUnknownCode="";if($("archiveUnknownCode"))$("archiveUnknownCode").classList.add("hidden");
+  message("productArchiveMessage","Variante salvata nell’archivio permanente.");
+  await renderProductArchive();await renderResults();
 }
 
 /* SCELTA ARTICOLI */
@@ -535,10 +578,14 @@ async function onBarcode(code) {
     ...(activeListino && Array.isArray(activeListino.rows) ? activeListino.rows : []),
     ...(Array.isArray(pdfPreviewRows) ? pdfPreviewRows : [])
   ];
-  const a = sources.find(x => {
+  let a = sources.find(x => {
     const storedKey = scannerMatchKey(x && x.code);
     return storedKey !== "" && scannedKey !== "" && storedKey === scannedKey;
   });
+  if (!a) {
+    const archived=(await all("productArchive")).find(x=>scannerMatchKey(x.code)===scannedKey);
+    if(archived)a=await archiveAsArticle(archived);
+  }
   const scanStatus = $("scanMessage");
   if (a) {
     if (!await ensureCustomer()) {
@@ -559,7 +606,9 @@ async function onBarcode(code) {
     return;
   }
   if (scanStatus) scanStatus.className = "status scan-missing";
-  message("scanMessage", "ARTICOLO NON IN LISTINO: " + scanned + ". Puoi inserirlo manualmente.");
+  lastUnknownCode=scanned;
+  if($("archiveUnknownCode"))$("archiveUnknownCode").classList.remove("hidden");
+  message("scanMessage", "ARTICOLO NON IN LISTINO: " + scanned + ". Puoi inserirlo manualmente o registrarlo nell’archivio.");
   $("manualAdd").classList.remove("hidden");
   $("manualName").value = ""; $("manualQty").value = ""; $("manualName").focus();
 }
@@ -580,11 +629,19 @@ async function mergeArticles(rows) {
   let count=0; for(const a of rows){if(!a.code||!a.name)continue;await put("articles",{...a,code:String(a.code).trim(),name:String(a.name).trim()});count++;}
   await refreshArticles(); return count;
 }
+async function replaceActiveArticles(rows) {
+  await new Promise((resolve,reject)=>{
+    const tx=db.transaction("articles","readwrite"), os=tx.objectStore("articles"); os.clear();
+    rows.forEach(a=>{if(a.code&&a.name)os.put({...a,code:String(a.code).trim(),name:String(a.name).trim()});});
+    tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);
+  });
+  await refreshArticles();return rows.filter(a=>a.code&&a.name).length;
+}
 async function importCsv() {
   const file=$("csvFile").files[0];if(!file){alert("Seleziona un file CSV.");return;}
   try{const rows=parseCsv(await file.text());if(!rows.length)throw new Error("Nessun articolo riconosciuto.");
-    const n=await mergeArticles(rows);activeListino=null;await removeRecord("meta","activeListino");localStorage.setItem("gestioneListiniNomeFile",file.name);refreshListinoInfo();
-    message("importMessage", "Listino " + file.name + ": " + n + " articoli importati o aggiornati.");}
+    const n=await replaceActiveArticles(rows);activeListino={name:file.name,rows,importedAt:new Date().toISOString()};await put("meta",{key:"activeListino",value:activeListino});localStorage.setItem("gestioneListiniNomeFile",file.name);refreshListinoInfo();
+    message("importMessage", "Listino " + file.name + ": " + n + " articoli caricati nel nuovo listino.");}
   catch(e){message("importMessage","Errore CSV: "+e.message);}
 }
 function excelHeaderKey(value) {
@@ -651,9 +708,9 @@ async function importExcel() {
       try{rows=parseFlexibleExcel(data);if(rows.length)break;}catch(e){/* prova il foglio successivo */}
     }
     if(!rows.length)throw new Error("Nessun articolo riconosciuto. Verifica che ci siano le colonne CODICE e ARTICOLO.");
-    const n=await mergeArticles(rows);
-    activeListino=null;await removeRecord("meta","activeListino");localStorage.setItem("gestioneListiniNomeFile",file.name);refreshListinoInfo();
-    message("importMessage", "Listino " + file.name + ": " + n + " articoli importati o aggiornati. Le colonne riconosciute sono state associate automaticamente.");
+    const n=await replaceActiveArticles(rows);
+    activeListino={name:file.name,rows,importedAt:new Date().toISOString()};await put("meta",{key:"activeListino",value:activeListino});localStorage.setItem("gestioneListiniNomeFile",file.name);refreshListinoInfo();
+    message("importMessage", "Listino " + file.name + ": " + n + " articoli caricati nel nuovo listino. Le colonne riconosciute sono state associate automaticamente.");
   } catch(e){message("importMessage","Errore Excel: "+e.message);}
 }
 
@@ -693,15 +750,30 @@ function parsePdfLines(lines) {
     const line=text[i],start=line.match(/^(\d{3,8})\s+(.+)$/);let code="",description="";
     if(start){code=start[1];description=start[2];}else if(codePattern.test(line))code=line;else continue;
     if(seen.has(code))continue;
-    const collected=[description];let price=null,original=[];
-    for(let j=i;j<Math.min(i+8,text.length);j++){const current=text[j];original.push(current);const m=current.match(pricePattern);
-      if(m){price=Number(m[1].replace(",", "."));break;}if(j>i&&!codePattern.test(current))collected.push(current);}
+    const collected=[description];let price=null,original=[],afterPrice="";
+    for(let j=i;j<Math.min(i+8,text.length);j++){
+      const current=text[j];original.push(current);const m=current.match(pricePattern);
+      if(m){
+        price=Number(m[1].replace(",","."));
+        afterPrice=current.slice(m.index+m[0].length).trim();
+        break;
+      }
+      if(j>i&&!codePattern.test(current))collected.push(current);
+    }
     if(price===null||!Number.isFinite(price))continue;
-    const combined=collected.join(" ").replace(/\s+/g," ").trim(),composition=combined.match(/(?:PL|WO|PA|PC|SE|CO|VI|LI|EA|AC|NY|WV|WS)\s*\d+\s*%.*$/i);
-    let name=combined,compositionText="";if(composition){compositionText=composition[0].trim();name=combined.slice(0,composition.index).trim();}
+    const combined=collected.join(" ").replace(/\s+/g," ").trim();
+    const composition=combined.match(/(?:PL|WO|PA|PC|SE|CO|VI|LI|EA|AC|NY|WV|WS)\s*\d+\s*%.*$/i);
+    let name=combined,compositionText="";
+    if(composition){compositionText=composition[0].replace(/\bEURO\b.*$/i,"").trim();name=combined.slice(0,composition.index).trim();}
     name=name.replace(/\bEURO\b.*$/i,"").trim();if(!name)continue;
-    out.push({code,name,price:String(price),currency:"EUR",originalFields:{originalLines:original,composition:compositionText,fullDescription:combined}});seen.add(code);
-  }return out;
+    const suffix=afterPrice.split(/\s+/).filter(Boolean);
+    const heightIndex=suffix.findIndex(v=>/^\d{2,3}\s*\/\s*\d{2,3}$/.test(v));
+    const height=heightIndex>=0?suffix[heightIndex].replace(/\s+/g,""):"";
+    const weights=suffix.filter((v,k)=>k!==heightIndex&&/^\d+(?:[,.]\d+)?$/.test(v));
+    const originalFields={originalLines:original,composition:compositionText,weight:weights.length?weights.join(" / "):"",height,fullDescription:""};
+    out.push({code,name,price:String(price),currency:"EUR",originalFields});seen.add(code);
+  }
+  return out;
 }
 function renderPdfPreview(rows, listinoName="", imported=false) {
   const host=$("pdfPreviewList");host.replaceChildren();
@@ -723,18 +795,18 @@ async function readPdf() {
 }
 async function confirmPdfImport() {
   if(!pdfPreviewRows.length)return;
-  if(!confirm("Importare o aggiornare "+pdfPreviewRows.length+" articoli? Gli altri articoli già presenti saranno conservati."))return;
+  if(!confirm("Il nuovo PDF sostituirà il listino attuale. L’archivio articoli e le selezioni salvate resteranno conservati. Procedere?"))return;
   const file=$("pdfFile").files[0];
   const listinoName=file?file.name:(activeListino&&activeListino.name)||"Listino PDF";
   const rows=pdfPreviewRows.map(a=>({...a}));
-  const n=await mergeArticles(rows);
+  const n=await replaceActiveArticles(rows);
   activeListino={name:listinoName,rows:rows,importedAt:new Date().toISOString()};
   await put("meta",{key:"activeListino",value:activeListino});
   localStorage.setItem("gestioneListiniNomeFile",listinoName);
   refreshListinoInfo();
   renderPdfPreview(rows,listinoName,true);
   $("pdfFile").value="";
-  message("pdfMessage",n+" articoli importati/aggiornati. Il listino resta visibile qui sotto.");
+  message("pdfMessage",n+" articoli caricati nel nuovo listino. Il listino resta visibile qui sotto.");
 }
 function cancelPdfImport(){
   pdfPreviewRows=[];
@@ -757,7 +829,7 @@ function itemOriginalDetails(item) {
   add("Composizione", f.composition);
   add("Peso", f.weight);
   add("Altezze", f.height);
-  add("Dettagli", f.fullDescription);
+  if (!f.originalLines && f.fullDescription) add("Dettagli", f.fullDescription);
   // Le colonne aggiuntive dell'Excel vengono riportate con la propria intestazione.
   if (Array.isArray(f.extras)) f.extras.forEach(x => {
     const label=String(x && x.label || "").trim(), value=String(x && x.value || "").trim();
@@ -845,17 +917,18 @@ async function emailDocument() {
 async function exportData() {
   const metaRows = await all("meta");
   const selectionSequences = metaRows.filter(x => String(x.key || "").startsWith("selectionSequence-"));
-  const payload={exportedAt:new Date().toISOString(),articles:await all("articles"),choices:await all("choices"),customers:await customersData(),selectionSequences};
+  const payload={exportedAt:new Date().toISOString(),articles:await all("articles"),productArchive:await all("productArchive"),choices:await all("choices"),customers:await customersData(),selectionSequences};
   const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"}),url=URL.createObjectURL(blob),a=document.createElement("a");
   a.href=url;a.download="backup-gestione-listini.json";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);message("backupMessage","Backup esportato.");
 }
 async function restoreData() {
   const file=$("restoreFile").files[0];if(!file){alert("Seleziona un file JSON.");return;}
   try{const p=JSON.parse(await file.text());if(Array.isArray(p.articles))await mergeArticles(p.articles);
+    if(Array.isArray(p.productArchive))for(const entry of p.productArchive)if(entry.code&&entry.baseName&&entry.variant)await put("productArchive",entry);
     if(Array.isArray(p.choices))for(const c of p.choices)await put("choices",c);
     if(Array.isArray(p.customers))await saveCustomers(p.customers);
     if(Array.isArray(p.selectionSequences))for(const sequence of p.selectionSequences)if(sequence&&String(sequence.key||"").startsWith("selectionSequence-"))await put("meta",sequence);
-    await refreshCustomers();await renderSaved();message("backupMessage","Backup ripristinato. I dati già presenti sono stati conservati.");}
+    await refreshCustomers();await renderSaved();await renderProductArchive();message("backupMessage","Backup ripristinato. I dati già presenti sono stati conservati.");}
   catch(e){message("backupMessage","Backup non valido: "+e.message);}
 }
 
@@ -1066,7 +1139,7 @@ const EN = {
   "Esporta una copia dei dati o ripristina un backup precedente. Questa sezione è separata dalla gestione della password.":"Export a copy of your data or restore a previous backup. This section is separate from password management.",
   "Password":"Password",
   "Codice ":"Code ",
-  "articoli importati o aggiornati.":"items imported or updated.",
+  "articoli caricati nel nuovo listino.":"items imported or updated.",
   "articoli riconosciuti":"recognized items",
   "articoli salvati sul dispositivo.":"items stored on this device.",
   "Controlla l'anteprima prima di importare.":"Review the preview before importing.",
@@ -1103,7 +1176,7 @@ const EN = {
   "Password attuale non corretta.":"Current password is incorrect.",
   "Password aggiornata.":"Password updated.",
   "Impostazioni salvate.":"Settings saved.",
-  "articoli importati o aggiornati.":"items imported or updated.",
+  "articoli caricati nel nuovo listino.":"items imported or updated.",
   "Errore inizializzazione archivio: ":"Archive initialization error: ",
   "Errore fotocamera: ":"Camera error: ",
   "Errore CSV: ":"CSV error: ",
@@ -1148,7 +1221,7 @@ function t(value) {
   for (const [from,to] of prefixes) if (String(value).startsWith(from)) return to + String(value).slice(from.length);
   const suffixes = [
     [" articoli salvati sul dispositivo.", " items stored on this device."],
-    [" articoli importati o aggiornati.", " items imported or updated."],
+    [" articoli caricati nel nuovo listino.", " items imported or updated."],
     [" salvata. Inserisci il prossimo cliente.", " saved. Enter the next customer."]
   ];
   for (const [from,to] of suffixes) if (String(value).endsWith(from)) return String(value).slice(0,-from.length) + to;
@@ -1203,6 +1276,15 @@ document.addEventListener("click", event => {
   if (matches && !matches.contains(event.target) && event.target !== $("customer")) matches.classList.add("hidden");
 });
 $("search").oninput=renderResults;$("startScan").onclick=startScanner;
+$("addProductArchiveEntry").onclick=addProductArchiveEntry;
+$("archiveUnknownCode").onclick=()=>{
+  $("archiveCode").value=lastUnknownCode||"";
+  $("productArchiveWorkspace").classList.remove("hidden");
+  const moreTab=document.querySelector('.nav-tab[data-tab="more"]');if(moreTab)moreTab.click();
+  renderProductArchive();
+  $("archiveBaseName").focus();
+};
+$("showProductArchive").onclick=async()=>{ $("productArchiveWorkspace").classList.toggle("hidden"); await renderProductArchive(); };
 $("showManual").onclick=async()=>{if(await ensureCustomer())$("manualAdd").classList.remove("hidden");};
 $("addManual").onclick=addManual;
 $("readPdf").onclick=readPdf;$("confirmPdfImport").onclick=confirmPdfImport;$("cancelPdfImport").onclick=cancelPdfImport;
@@ -1228,6 +1310,6 @@ document.addEventListener("visibilitychange",async()=>{if(document.visibilitySta
       else{$("authGate").classList.remove("hidden");$("passwordLogin").classList.remove("hidden");}
     }else{$("authGate").classList.remove("hidden");$("passwordSetup").classList.remove("hidden");}
     newChoice();
-    if("serviceWorker"in navigator){try{await navigator.serviceWorker.register("./sw.js?v=17");}catch(e){console.warn("Service worker non registrato",e);}}
+    if("serviceWorker"in navigator){try{await navigator.serviceWorker.register("./sw.js?v=18");}catch(e){console.warn("Service worker non registrato",e);}}
   }catch(e){alert("Errore inizializzazione archivio: "+e.message);}
 })();

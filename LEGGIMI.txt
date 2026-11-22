@@ -1,22 +1,28 @@
-GESTIONE LISTINI IPHONE — REVISIONE 2
+GESTIONE LISTINI IPHONE — REVISIONE 4
 
-BASE DI PARTENZA
-- Copia di sviluppo separata, derivata dal pacchetto V.24 e dalla prima interfaccia mobile.
-- Non modifica il repository gestione-listini-test né la versione V.24 considerata stabile.
+BASE
+- Derivata dalla revisione 3 caricata dall’utente.
+- Da pubblicare esclusivamente nel repository gestione-listini-iphone.
+- Non modificare il repository gestione-listini-test né la V.24 stabile.
 
-MODIFICHE IN QUESTA REVISIONE
-1. Scanner: rimossa la lista separata degli ultimi tre articoli letti. Gli articoli aggiunti compaiono una sola volta nella lista Articoli selezionati.
-2. Scanner: lettura valida e nuovo inserimento = messaggio verde, suono e vibrazione. Articolo già presente = messaggio rosso, senza suono. Codice non presente nel listino = messaggio rosso distinto e possibilità di inserimento manuale.
-3. Navigazione: i pulsanti Lavoro, Archivio e Altro hanno colori più evidenti; la sezione attiva è blu scuro con testo bianco.
-4. PDF/email: quando si seleziona “Includi i dettagli originali”, i dettagli vengono presentati con etichette (ad esempio “Peso: 480” e “Altezze: 150/148”), invece di una sequenza di valori senza nome.
-5. Excel: l'importazione cerca le intestazioni anche se ci sono titolo o righe vuote sopra. Associa automaticamente colonne come CODICE, ARTICOLO/NOME ARTICOLO, PREZZO, COMPOSIZIONE, PESO e ALTEZZE anche se sono in posizioni diverse. Conserva anche le altre colonne valorizzate con la loro intestazione, per riportarle nei dettagli del PDF/email.
+MODIFICHE
+1. Archivio articoli permanente separato dal listino attuale, con conservazione su IndexedDB.
+2. In ALTRO è presente il pulsante LISTA ARCHIVIO ARTICOLI.
+3. È possibile aggiungere progressivamente una variante indicando articolo principale, serie/disegno e codice.
+4. Le diciture S.1 e SERIE 1 vengono normalizzate come SERIE 1.
+5. Le varianti archiviate ereditano il prezzo dall’articolo principale nel listino attuale. Se il principale non è nel listino attuale, la variante resta selezionabile e mostra PREZZO ASSENTE.
+6. Ricerca e scanner riconoscono anche i codici presenti nell’archivio permanente.
+7. Importando PDF, Excel o CSV il nuovo listino sostituisce il precedente; archivio permanente e selezioni salvate restano separati.
+8. Backup JSON include anche l’archivio permanente.
+9. Per PDF con dati tabellari sulla stessa riga, il parser conserva i valori successivi al prezzo e li mostra con etichette Composizione, Peso e Altezze. I valori numerici successivi al prezzo sono raccolti nel campo Peso.
+10. Cache aggiornata alla revisione 4.
 
-NOTE E LIMITI
-- Per associare correttamente un articolo al codice a barre, il foglio Excel deve avere una colonna CODICE e una colonna ARTICOLO (o NOME ARTICOLO / DESCRIZIONE).
-- Le intestazioni devono essere presenti nella stessa riga; possono esserci righe di titolo o vuote prima.
-- Il lettore Excel usa la prima scheda che contiene una tabella riconoscibile.
-- La revisione è preparata ma va provata nell'app online, soprattutto con il file Excel di esempio e con un listino reale. Non considerarla ancora collaudata su tutti i formati Excel o su tutti i telefoni.
+DA PROVARE
+- Aggiungere SPRINT / S.1 / codice e poi SPRINT / SERIE 2 / codice.
+- Caricare un listino con SPRINT e verificare che le due varianti mostrino il prezzo SPRINT.
+- Caricare un nuovo listino senza SPRINT e verificare PREZZO ASSENTE, mantenendo selezionabili le varianti.
+- Verificare import Excel e PDF reali, soprattutto la corrispondenza dei campi Peso e Altezze.
+- Verificare backup e ripristino su un dispositivo di prova.
 
 INSTALLAZIONE
-- Caricare il contenuto dello ZIP nel repository separato gestione-listini-iphone, sostituendo i file della sola copia di sviluppo.
-- Non caricare questo ZIP nel repository gestione-listini-test (V.24 stabile).
+Caricare il contenuto dello ZIP nel repository separato gestione-listini-iphone. Non caricarlo nel repository gestione-listini-test.

@@ -189,7 +189,8 @@ input,select,textarea{min-height:50px;font-size:1rem}
   <div id="manualAdd" class="hidden"><h3>Inserimento articolo manuale</h3><p class="muted">L'articolo sarà inserito solo in questa scelta e non nel listino.</p>
     <label for="manualName">Nome articolo</label><input id="manualName" type="text"><label for="manualPrice">Prezzo</label><input id="manualPrice" type="number" min="0" step="0.01">
     <label for="manualQty">Metri (facoltativo)</label><input id="manualQty" type="text" placeholder="Inserisci i metri solo se necessari"><label for="manualNote">Nota articolo</label><textarea id="manualNote"></textarea>
-    <button id="addManual" class="success">Aggiungi articolo manuale</button></div>
+    <button id="addManual" class="success">Aggiungi articolo manuale</button>
+    <button id="archiveUnknownCode" class="secondary hidden">Registra il codice letto nell’archivio</button></div>
   <button id="showManual" class="secondary">Inserisci articolo non presente nel listino</button>
   <label for="generalNote">Note generali della scelta</label><textarea id="generalNote" placeholder="Note aggiuntive..."></textarea>
 </section>
@@ -206,12 +207,29 @@ input,select,textarea{min-height:50px;font-size:1rem}
   <input id="savedSearch" type="search" placeholder="Es. Rossi oppure 12/2026">
   <div id="savedChoices" class="muted"></div>
 </section>
+<section class="panel" data-screen="more" id="productArchivePanel">
+  <h2>Archivio articoli permanente</h2>
+  <button id="showProductArchive" class="success">LISTA ARCHIVIO ARTICOLI</button>
+  <div id="productArchiveWorkspace" class="hidden">
+    <p class="muted">Aggiungi progressivamente codici, serie e disegni. L’archivio resta conservato anche quando carichi un nuovo listino. Il prezzo viene preso dal listino attuale usando il nome dell’articolo principale.</p>
+    <label for="archiveBaseName">Articolo principale (come nel listino)</label>
+    <input id="archiveBaseName" type="text" placeholder="Es. SPRINT">
+    <label for="archiveVariant">Serie o disegno</label>
+    <input id="archiveVariant" type="text" placeholder="Es. S.1 oppure SERIE 1">
+    <label for="archiveCode">Codice a barre / codice articolo</label>
+    <input id="archiveCode" type="text" placeholder="Codice della variante">
+    <button id="addProductArchiveEntry" class="success">Salva articolo nell’archivio</button>
+    <div id="productArchiveMessage" class="status"></div>
+    <h3>Articoli e varianti archiviati</h3>
+    <div id="productArchiveList"></div>
+  </div>
+</section>
 <section class="panel" data-screen="more" id="backupPanel">
   <h2>Backup e ripristino</h2><p class="muted">Esporta una copia dei dati o ripristina un backup precedente. Questa sezione è separata dalla gestione della password.</p>
   <div class="row"><button id="exportData" class="secondary">Esporta backup JSON</button><div><label for="restoreFile">File di backup</label><input id="restoreFile" type="file" accept=".json,application/json"><button id="restoreData" class="secondary">Ripristina backup</button></div></div><div id="backupMessage" class="status"></div>
 </section>
 <section class="panel" data-screen="more" id="listinoPanel">
-  <h2>Listini e importazione articoli</h2><p class="muted">Importa il listino PDF, CSV oppure Excel. Gli articoli importati vengono conservati nell'archivio locale.</p>
+  <h2>Listini e importazione articoli</h2><p class="muted">Importa il listino PDF, CSV oppure Excel. Il nuovo listino sostituisce il precedente; l’archivio permanente degli articoli resta separato.</p>
   <label for="pdfFile">Listino PDF</label><input id="pdfFile" type="file" accept="application/pdf,.pdf">
   <button id="readPdf">Leggi PDF e mostra anteprima</button><div id="pdfMessage" class="status">Seleziona un PDF.</div>
   <div id="pdfPreview" class="pdf-preview hidden"><div class="pdf-preview-head"><span id="pdfPreviewCount">Articoli riconosciuti</span></div><div id="pdfPreviewList" class="pdf-preview-list"></div>
@@ -251,8 +269,8 @@ input,select,textarea{min-height:50px;font-size:1rem}
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="./scanner/html5-qrcode.min.js?v=17"></script>
-<script src="./app.js?v=17"></script>
+<script src="./scanner/html5-qrcode.min.js?v=18"></script>
+<script src="./app.js?v=18"></script>
 
 <script>
 (function(){
