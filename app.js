@@ -150,6 +150,7 @@ async function loadCustomerBusinessCard() {
   currentBusinessCardPhoto=customer && customer.businessCardPhoto ? customer.businessCardPhoto : "";
   const statusNode=$("businessCardStatus");
   if(statusNode)statusNode.textContent=currentBusinessCardPhoto?"Foto biglietto già salvata per questo cliente.":"Nessuna foto del biglietto salvata.";
+  const deleteButton=$("deleteBusinessCardPhoto");if(deleteButton)deleteButton.classList.toggle("hidden",!currentBusinessCardPhoto);
 }
 async function ensureCustomer() {
   const name = $("customer").value.trim(), department = $("department").value;
@@ -956,6 +957,7 @@ async function printDocument() {
 async function emailDocument() {
   if (!currentItems.length) { alert(t("Aggiungi almeno un articolo.")); return; }
   if (!$("customer").value.trim()) { alert(t("Seleziona prima il cliente.")); $("customer").focus(); return; }
+  const mailWindow=window.open("about:blank","_blank");
   await ensureSelectionNumber();
   const c = choicePayload();
   const subject = encodeURIComponent(t("Selezione N. ") + c.number + " - " + c.customer);
@@ -969,7 +971,7 @@ async function emailDocument() {
     }
     if (c.includePrices) bits.push(priceText(i));
     if (i.note && i.note.trim()) bits.push("  NOTE: " + i.note.trim());
-    return bits.join("\\n");
+    return bits.join("\n");
   });
   const body = encodeURIComponent(
     t("Selezione N. ") + c.number +
@@ -979,15 +981,8 @@ async function emailDocument() {
     (c.note ? "\n\n" + t("Note generali") + ": " + c.note : "") +
     "\n\n" + t("Per allegare il PDF, genera il documento e usa Condividi / Salva PDF.")
   );
-  if(currentBusinessCardPhoto && navigator.share && navigator.canShare){
-    try{
-      const blob=await (await fetch(currentBusinessCardPhoto)).blob();
-      const photoFile=new File([blob],"biglietto-visita-"+(c.customer||"cliente").replace(/[^a-z0-9_-]/gi,"_")+".jpg",{type:blob.type||"image/jpeg"});
-      const shareData={title:t("Selezione N. ")+c.number,text:decodeURIComponent(body),files:[photoFile]};
-      if(navigator.canShare({files:[photoFile]})){await navigator.share(shareData);return;}
-    }catch(e){/* fallback alla bozza email testuale */}
-  }
-  window.location.href = "mailto:?subject=" + subject + "&body=" + body;
+  const mailto="mailto:?subject=" + subject + "&body=" + body;
+  if(mailWindow){mailWindow.location.href=mailto;}else{window.location.href=mailto;}
 }
 
 
@@ -1359,7 +1354,18 @@ $("businessCardPhoto").onchange=async()=>{
     const name=$("customer").value.trim();
     if(name){const data=await customersData();let c=data.find(x=>norm(x.name)===norm(name));if(!c){c={name,departments:[]};data.push(c);}c.businessCardPhoto=currentBusinessCardPhoto;await saveCustomers(data);}
     $("businessCardStatus").textContent="Foto del biglietto salvata per il cliente.";
+    $("deleteBusinessCardPhoto").classList.toggle("hidden",!currentBusinessCardPhoto);
   };reader.readAsDataURL(file);
+};
+$("deleteBusinessCardPhoto").onclick=async()=>{
+  const name=$("customer").value.trim();
+  if(!currentBusinessCardPhoto)return;
+  if(!confirm("Eliminare la foto del biglietto da visita salvata per questo cliente?"))return;
+  const data=await customersData();const customer=data.find(c=>norm(c.name)===norm(name));
+  if(customer){delete customer.businessCardPhoto;await saveCustomers(data);}
+  currentBusinessCardPhoto="";$("businessCardPhoto").value="";
+  $("businessCardStatus").textContent="Nessuna foto del biglietto salvata.";
+  $("deleteBusinessCardPhoto").classList.add("hidden");
 };
 document.addEventListener("click", event => {
   const matches = $("customerMatches");
@@ -1393,12 +1399,12 @@ $("saveChoice").onclick=saveChoice;$("newChoice").onclick=newChoice;$("printDocu
 $("savedSearch").oninput=renderSaved;
 $("previewClose").onclick=()=>{$("documentPreviewModal").classList.add("hidden");$("documentPreviewModal").setAttribute("aria-hidden","true");};
 $("previewPrint").onclick=()=>{
-  const docHtml=$("documentPreviewFrame").srcdoc||buildDocumentHtml();
   try{
-    const w=window.open("","_blank");
-    if(w){w.document.open();w.document.write(docHtml);w.document.close();w.focus();setTimeout(()=>{try{w.print();}catch(e){}},500);}
-    else {const frame=$("documentPreviewFrame");frame.contentWindow.focus();frame.contentWindow.print();}
-  }catch(e){message("documentMessage","Impossibile aprire la stampa. Consenti le finestre a comparsa per questo sito e riprova.");}
+    const frame=$("documentPreviewFrame");
+    if(!frame.contentWindow)throw new Error("Anteprima non disponibile");
+    frame.contentWindow.focus();
+    frame.contentWindow.print();
+  }catch(e){message("documentMessage","Impossibile aprire la stampa. Riprova dal pulsante Genera PDF / Stampa.");}
 };
 $("exportData").onclick=exportData;$("restoreData").onclick=restoreData;
 $("clearRestoreFile").onclick=()=>{if(!$("restoreFile").files.length)return;if(confirm("Rimuovere il backup selezionato dal modulo? Il file originale sul dispositivo non verrà cancellato.")){$("restoreFile").value="";$("restoreFileName").textContent="Nessun backup selezionato.";}}; 
