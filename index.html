@@ -171,21 +171,24 @@ input,select,textarea{min-height:50px;font-size:1rem}
 
 <section class="panel" data-screen="work" id="customerPanel">
   <h2>Cliente</h2><label for="customer">Cliente</label><input id="customer" type="text" placeholder="Seleziona o inserisci il cliente"><div id="customerMatches" class="customer-matches hidden" aria-live="polite"></div>
+  <label for="businessCardPhoto">Foto biglietto da visita (facoltativa)</label><input id="businessCardPhoto" type="file" accept="image/*" capture="environment"><div id="businessCardStatus" class="muted">Nessuna foto del biglietto salvata.</div>
   <div class="row"><div><label for="department">Reparto (facoltativo)</label><select id="department"><option value="">Nessun reparto / seleziona</option></select></div>
     <div><label for="newDepartment">Nuovo reparto</label><input id="newDepartment" type="text" placeholder="Nome reparto"></div></div>
   <button id="addDepartment" class="secondary">Aggiungi reparto al cliente</button><div id="customerMessage" class="status"></div>
 </section>
 <section class="panel" data-screen="work" id="searchPanel">
   <h2>Cerca e aggiungi articoli</h2><label for="search">Cerca per nome o codice</label><input id="search" type="search" placeholder="Scrivi il nome o il codice articolo">
-  <div class="row"><button id="startScan" class="success">Apri fotocamera e scansiona</button></div>
+  <div class="row"><button id="startScan" class="success">Apri fotocamera e scansiona</button><button id="toggleBluetoothScanner" class="secondary">Usa scanner Bluetooth</button></div>
+  <input id="bluetoothScannerInput" class="hidden" type="text" inputmode="none" autocomplete="off" autocapitalize="off" placeholder="In attesa del codice dello scanner Bluetooth">
   <p class="muted">Inquadra il codice a barre intero, in orizzontale e ben illuminato. Premi di nuovo il pulsante per chiudere lo scanner.</p>
   <div id="reader" class="hidden"></div><div id="scanMessage" class="status">Scanner non avviato.</div>
+  <h3>Articoli selezionati</h3><div id="choiceItems" class="muted">Nessun articolo selezionato.</div>
   <div id="results"></div>
 </section>
 <section class="panel" data-screen="work" id="itemsPanel">
   <h2>La tua selezione</h2><div class="row"><div><label for="choiceDate">Data</label><input id="choiceDate" type="date"></div>
   <div><label for="choiceNumber">Numero selezione (assegnato automaticamente)</label><input id="choiceNumber" type="text" placeholder="Automatico" readonly></div></div>
-  <h3>Articoli selezionati</h3><div id="choiceItems" class="muted">Nessun articolo selezionato.</div><div class="divider"></div>
+  <div class="divider"></div>
   <div id="manualAdd" class="hidden"><h3>Inserimento articolo manuale</h3><p class="muted">L'articolo sarà inserito solo in questa scelta e non nel listino.</p>
     <label for="manualName">Nome articolo</label><input id="manualName" type="text"><label for="manualPrice">Prezzo</label><input id="manualPrice" type="number" min="0" step="0.01">
     <label for="manualQty">Metri (facoltativo)</label><input id="manualQty" type="text" placeholder="Inserisci i metri solo se necessari"><label for="manualNote">Nota articolo</label><textarea id="manualNote"></textarea>
@@ -226,10 +229,10 @@ input,select,textarea{min-height:50px;font-size:1rem}
 </section>
 <section class="panel" data-screen="more" id="backupPanel">
   <h2>Backup e ripristino</h2><p class="muted">Esporta una copia dei dati o ripristina un backup precedente. Questa sezione è separata dalla gestione della password.</p>
-  <div class="row"><button id="exportData" class="secondary">Esporta backup JSON</button><div><label for="restoreFile">File di backup</label><input id="restoreFile" type="file" accept=".json,application/json"><button id="restoreData" class="secondary">Ripristina backup</button></div></div><div id="backupMessage" class="status"></div>
+  <div class="row"><button id="exportData" class="secondary">Esporta backup JSON</button><div><label for="restoreFile">File di backup</label><input id="restoreFile" type="file" accept=".json,application/json"><div id="restoreFileName" class="muted">Nessun backup selezionato.</div><button id="restoreData" class="secondary">Ripristina backup</button><button id="clearRestoreFile" class="danger">Rimuovi backup selezionato</button></div></div><div id="backupMessage" class="status"></div>
 </section>
 <section class="panel" data-screen="more" id="listinoPanel">
-  <h2>Listini e importazione articoli</h2><p class="muted">Importa il listino PDF, CSV oppure Excel. Il nuovo listino sostituisce il precedente; l’archivio permanente degli articoli resta separato.</p>
+  <h2>Listini e importazione articoli</h2><p class="muted">Puoi caricare più listini PDF, Excel o CSV contemporaneamente. Ogni listino è gestibile e cancellabile singolarmente; l’archivio permanente degli articoli resta separato.</p>
   <label for="pdfFile">Listino PDF</label><input id="pdfFile" type="file" accept="application/pdf,.pdf">
   <button id="readPdf">Leggi PDF e mostra anteprima</button><div id="pdfMessage" class="status">Seleziona un PDF.</div>
   <div id="pdfPreview" class="pdf-preview hidden"><div class="pdf-preview-head"><span id="pdfPreviewCount">Articoli riconosciuti</span></div><div id="pdfPreviewList" class="pdf-preview-list"></div>
@@ -239,7 +242,7 @@ input,select,textarea{min-height:50px;font-size:1rem}
   <div class="row"><div><label for="csvFile">Listino CSV</label><input id="csvFile" type="file" accept=".csv,text/csv"><button id="importCsv" class="secondary">Importa CSV</button></div>
     <div><label for="excelFile">Listino Excel</label><input id="excelFile" type="file" accept=".xlsx,.xls"><button id="importExcel" class="secondary">Importa Excel</button></div></div>
   <div class="muted" id="csvSelectedName">Nessun file CSV selezionato.</div><div class="muted" id="excelSelectedName">Nessun file Excel selezionato.</div>
-  <div id="importMessage" class="status"></div><div id="listinoInfo" class="muted">Nessun listino caricato.</div>
+  <div id="importMessage" class="status"></div><div id="listinoInfo" class="muted">Nessun listino caricato.</div><h3>Listini caricati</h3><div id="priceListsList"></div>
 </section>
 <section class="panel" data-screen="more" id="settingsPanel">
   <h2>Impostazioni e sicurezza</h2>
@@ -270,7 +273,7 @@ input,select,textarea{min-height:50px;font-size:1rem}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="./scanner/html5-qrcode.min.js?v=18"></script>
-<script src="./app.js?v=18"></script>
+<script src="./app.js?v=19"></script>
 
 <script>
 (function(){

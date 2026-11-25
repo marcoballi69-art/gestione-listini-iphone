@@ -1,10 +1,12 @@
 "use strict";
 
 const DB_NAME = "gestione-listini-offline";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 let db, articles = [], currentItems = [], currentChoiceId = null;
 let scanner = null, lastScan = "", pdfPreviewRows = [], activeListino = null, idleTimer = null, lastUnknownCode = "";
 let currentLanguage = "it";
+let currentBusinessCardPhoto = "";
+let bluetoothScannerEnabled = false;
 let recentScans = [], scanBusy = false, lastScanAt = 0, audioContext = null;
 let screenWakeLock = null;
 const $ = id => document.getElementById(id);
@@ -18,6 +20,7 @@ function openDb() {
       if (!d.objectStoreNames.contains("choices")) d.createObjectStore("choices", { keyPath: "id" });
       if (!d.objectStoreNames.contains("meta")) d.createObjectStore("meta", { keyPath: "key" });
       if (!d.objectStoreNames.contains("productArchive")) d.createObjectStore("productArchive", { keyPath: "code" });
+      if (!d.objectStoreNames.contains("priceLists")) d.createObjectStore("priceLists", { keyPath: "id" });
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -140,6 +143,14 @@ async function saveCustomerDepartment() {
   await renderCustomerMatches();
   message("customerMessage", "Cliente e reparto salvati.");
 }
+async function loadCustomerBusinessCard() {
+  const name=$("customer").value.trim();
+  const data=await customersData();
+  const customer=data.find(c=>norm(c.name)===norm(name));
+  currentBusinessCardPhoto=customer && customer.businessCardPhoto ? customer.businessCardPhoto : "";
+  const statusNode=$("businessCardStatus");
+  if(statusNode)statusNode.textContent=currentBusinessCardPhoto?"Foto biglietto già salvata per questo cliente.":"Nessuna foto del biglietto salvata.";
+}
 async function ensureCustomer() {
   const name = $("customer").value.trim(), department = $("department").value;
   if (!name) { message("customerMessage", "Seleziona o inserisci il cliente prima di aggiungere articoli."); $("customer").focus(); return false; }
@@ -147,6 +158,7 @@ async function ensureCustomer() {
   let c = data.find(x => norm(x.name) === norm(name));
   if (!c) { c = { name, departments: [] }; data.push(c); }
   c.departments = c.departments || [];
+  if (currentBusinessCardPhoto) c.businessCardPhoto=currentBusinessCardPhoto;
   if (department && !c.departments.includes(department)) c.departments.push(department);
   await saveCustomers(data);
   message("customerMessage", department ? "Cliente e reparto selezionati." : "Cliente selezionato. Reparto facoltativo.");
@@ -154,25 +166,77 @@ async function ensureCustomer() {
 }
 
 /* ARCHIVIO E RICERCA */
-function refreshListinoInfo() {
-  const activeName = (activeListino && activeListino.name) || localStorage.getItem("gestioneListiniNomeFile") || "";
-  const activeCount = activeListino && Array.isArray(activeListino.rows) ? activeListino.rows.length : articles.length;
-  $("listinoInfo").textContent = (activeName ? "Listino caricato: " + activeName + " — " : "") + activeCount + t(" articoli nel listino.");
+async function getPriceListRows() {
+  const lists = await all("priceLists");
+  if (lists.length) return lists.flatMap(list => (list.rows || []).map(row => ({...row, listinoId:list.id, listinoName:list.name})));
+  const initialized=await getValue("meta","priceListsInitialized");
+  if(initialized && initialized.value===true)return [];
+  return (await all("articles")).map(row => ({...row, listinoName:"Listino precedente"}));
+}
+async function refreshListinoInfo() {
+  const lists = await all("priceLists");
+  const initialized=await getValue("meta","priceListsInitialized");
+  if (lists.length) {
+    $("listinoInfo").textContent = lists.length + " listini caricati — " + lists.reduce((n,x)=>n+(x.rows||[]).length,0) + " righe articolo.";
+  } else if(!initialized) {
+    const legacy = await getValue("meta","activeListino");
+    const count = (legacy && legacy.value && legacy.value.rows && legacy.value.rows.length) || articles.length;
+    $("listinoInfo").textContent = count ? "Listino precedente: " + count + " articoli." : "Nessun listino caricato.";
+  } else $("listinoInfo").textContent="Nessun listino caricato.";
+  await renderListinoManager();
+}
+async function renderListinoManager() {
+  const host=$("priceListsList"); if(!host)return;
+  const lists=await all("priceLists"); host.replaceChildren();
+  if(!lists.length){host.textContent="Nessun listino caricato.";return;}
+  lists.sort((a,b)=>(a.importedAt||"").localeCompare(b.importedAt||""));
+  lists.forEach(list=>{
+    const row=document.createElement("div");row.className="article";
+    const title=document.createElement("strong");title.textContent=list.name||"Listino senza nome";
+    const info=document.createElement("div");info.className="muted";info.textContent=(list.rows||[]).length+" articoli · "+(list.type||"file");
+    const del=document.createElement("button");del.className="danger";del.textContent="Elimina questo listino";
+    del.onclick=async()=>{if(!confirm("Eliminare il listino "+(list.name||"selezionato")+"? Le selezioni salvate e l’archivio articoli permanente non verranno eliminati."))return;
+      await removeRecord("priceLists",list.id);
+      const remaining=await all("priceLists");activeListino=remaining.length?remaining[remaining.length-1]:null;
+      await put("meta",{key:"activeListino",value:activeListino});
+      await put("meta",{key:"priceListsInitialized",value:true});
+      await refreshArticles();await refreshListinoInfo();await renderResults();
+      message("importMessage","Listino eliminato. Gli altri listini e gli archivi sono rimasti invariati.");};
+    row.append(title,info,del);host.append(row);
+  });
+}
+async function addPriceList(name,type,rows) {
+  const list={id:crypto.randomUUID(),name,type,rows:rows.map(a=>({...a})),importedAt:new Date().toISOString()};
+  await put("priceLists",list);
+  await put("meta",{key:"priceListsInitialized",value:true});
+  activeListino=list;
+  await put("meta",{key:"activeListino",value:list});
+  await refreshArticles();
+  await refreshListinoInfo();
+  return list;
 }
 async function restoreActiveListino() {
-  const saved = await getValue("meta", "activeListino");
-  if (!saved || !saved.value || !Array.isArray(saved.value.rows) || !saved.value.rows.length) {
-    refreshListinoInfo();
-    return;
+  let lists=await all("priceLists");
+  if(!lists.length){
+    const saved=await getValue("meta","activeListino");
+    if(saved && saved.value && Array.isArray(saved.value.rows) && saved.value.rows.length){
+      const old=saved.value;
+      const migrated={id:crypto.randomUUID(),name:old.name||"Listino importato in precedenza",type:"legacy",rows:old.rows,importedAt:old.importedAt||new Date().toISOString()};
+      await put("priceLists",migrated);
+      lists=[migrated];
+    }
   }
-  activeListino = saved.value;
-  localStorage.setItem("gestioneListiniNomeFile", activeListino.name || "");
-  renderPdfPreview(activeListino.rows, activeListino.name || "Listino caricato", true);
-  refreshListinoInfo();
+  await put("meta",{key:"priceListsInitialized",value:true});
+  activeListino=lists.length?lists[lists.length-1]:null;
+  if(activeListino) renderPdfPreview(activeListino.rows,activeListino.name||"Listino caricato",true);
+  await refreshListinoInfo();
 }
 async function refreshArticles() {
-  articles = await all("articles");
-  refreshListinoInfo();
+  const rows=await getPriceListRows();
+  const byCode=new Map();
+  rows.forEach(a=>{const key=codeKey(a.code);if(key&&!byCode.has(key))byCode.set(key,a);});
+  articles=[...byCode.values()];
+  await renderListinoManager();
   renderResults();
 }
 function showSelectedImportFile(inputId, labelId, fallback) {
@@ -192,16 +256,17 @@ function normalizeVariantLabel(value) {
 }
 async function renderResults() {
   const query=norm($("search").value), host=$("results"); host.replaceChildren();
+  const priceRows=await getPriceListRows();
   const archive=await all("productArchive"), archiveArticles=await Promise.all(archive.map(archiveAsArticle));
-  const found=[...articles,...archiveArticles]
-    .filter((a,i,arr)=>arr.findIndex(x=>codeKey(x.code)===codeKey(a.code))===i)
+  const found=[...priceRows,...archiveArticles]
+    .filter((a,i,arr)=>arr.findIndex(x=>codeKey(x.code)===codeKey(a.code)&&norm(x.name)===norm(a.name)&&String(x.price||"")===String(a.price||""))===i)
     .filter(a=>!query||norm(a.name).includes(query)||String(a.code).includes(query))
     .sort((a,b)=>String(a.name||"").localeCompare(String(b.name||""),"it",{sensitivity:"base",numeric:true}));
   if(!found.length){host.textContent=t("Nessun articolo trovato.");applyLanguage();return;}
   found.forEach(a=>{
     const div=document.createElement("div");div.className="article";
     const name=document.createElement("strong");name.textContent=a.name;
-    const details=document.createElement("div");details.className="price";details.textContent=t("Codice ")+a.code+" · "+priceText(a)+(a.archiveEntry?" · Archivio articoli":"");
+    const details=document.createElement("div");details.className="price";details.textContent=t("Codice ")+a.code+" · "+priceText(a)+(a.listinoName?" · "+a.listinoName:"")+(a.archiveEntry?" · Archivio articoli":"");
     const button=document.createElement("button");button.textContent="Aggiungi alla scelta";
     button.onclick=async()=>{if(await ensureCustomer())addArticle(a);};
     div.append(name,details,button);host.append(div);
@@ -213,7 +278,7 @@ function addArticle(a) {
     message("scanMessage", "Articolo già presente nella scelta: " + a.name + " — " + priceText(a));
     return false;
   }
-  currentItems.push({ code:a.code, name:a.name, price:a.price, currency:a.currency || "EUR", quantity:"", quantitySet:false, note:"", originalFields:a.originalFields || {}, manual:false, archiveEntry:!!a.archiveEntry, baseName:a.baseName||"", variant:a.variant||"" });
+  currentItems.push({ code:a.code, name:a.name, price:a.price, currency:a.currency || "EUR", quantity:"", quantitySet:false, note:"", originalFields:a.originalFields || {}, manual:false, archiveEntry:!!a.archiveEntry, baseName:a.baseName||"", variant:a.variant||"", listinoId:a.listinoId||"", listinoName:a.listinoName||"" });
   renderChoice(); autosaveDraft(); return true;
 }
 
@@ -309,6 +374,9 @@ function newChoice() {
   $("choiceDate").value = new Date().toISOString().slice(0,10);
   $("choiceNumber").value = "";
   $("customer").value = "";
+  currentBusinessCardPhoto = "";
+  if($("businessCardStatus"))$("businessCardStatus").textContent="Nessuna foto del biglietto salvata.";
+  if($("businessCardPhoto"))$("businessCardPhoto").value="";
   $("department").value = "";
   $("newDepartment").value = "";
   $("search").value = "";
@@ -391,6 +459,7 @@ async function renderSaved() {
       $("choiceDate").value = c.date || "";
       $("choiceNumber").value = c.number || "";
       $("customer").value = c.customer || "";
+      await loadCustomerBusinessCard();
       await refreshDepartments();
       $("department").value = c.department || "";
       $("generalNote").value = c.note || "";
@@ -573,15 +642,17 @@ function scannerMatchKey(value) {
 async function onBarcode(code) {
   const scanned = normalizeBarcodeCode(code);
   const scannedKey = scannerMatchKey(scanned);
-  const sources = [
-    ...(Array.isArray(articles) ? articles : []),
-    ...(activeListino && Array.isArray(activeListino.rows) ? activeListino.rows : []),
-    ...(Array.isArray(pdfPreviewRows) ? pdfPreviewRows : [])
-  ];
-  let a = sources.find(x => {
-    const storedKey = scannerMatchKey(x && x.code);
-    return storedKey !== "" && scannedKey !== "" && storedKey === scannedKey;
-  });
+  const sources = await getPriceListRows();
+  const matches=sources.filter(x=>scannerMatchKey(x&&x.code)===scannedKey && scannedKey!=="");
+  const distinct=matches.filter((x,i,arr)=>arr.findIndex(y=>norm(y.name)===norm(x.name)&&String(y.price||"")===String(x.price||""))===i);
+  if(distinct.length>1){
+    $("search").value=scanned;
+    await renderResults();
+    $("results").classList.remove("hidden");
+    message("scanMessage","Codice presente in più listini con dati/prezzi diversi. Scegli la riga corretta dall’elenco.");
+    return;
+  }
+  let a = distinct[0] || null;
   if (!a) {
     const archived=(await all("productArchive")).find(x=>scannerMatchKey(x.code)===scannedKey);
     if(archived)a=await archiveAsArticle(archived);
@@ -640,8 +711,8 @@ async function replaceActiveArticles(rows) {
 async function importCsv() {
   const file=$("csvFile").files[0];if(!file){alert("Seleziona un file CSV.");return;}
   try{const rows=parseCsv(await file.text());if(!rows.length)throw new Error("Nessun articolo riconosciuto.");
-    const n=await replaceActiveArticles(rows);activeListino={name:file.name,rows,importedAt:new Date().toISOString()};await put("meta",{key:"activeListino",value:activeListino});localStorage.setItem("gestioneListiniNomeFile",file.name);refreshListinoInfo();
-    message("importMessage", "Listino " + file.name + ": " + n + " articoli caricati nel nuovo listino.");}
+    const list=await addPriceList(file.name,"CSV",rows);const n=rows.length;
+    message("importMessage", "Listino " + file.name + ": " + n + " articoli aggiunti. I listini precedenti restano disponibili.");}
   catch(e){message("importMessage","Errore CSV: "+e.message);}
 }
 function excelHeaderKey(value) {
@@ -708,9 +779,8 @@ async function importExcel() {
       try{rows=parseFlexibleExcel(data);if(rows.length)break;}catch(e){/* prova il foglio successivo */}
     }
     if(!rows.length)throw new Error("Nessun articolo riconosciuto. Verifica che ci siano le colonne CODICE e ARTICOLO.");
-    const n=await replaceActiveArticles(rows);
-    activeListino={name:file.name,rows,importedAt:new Date().toISOString()};await put("meta",{key:"activeListino",value:activeListino});localStorage.setItem("gestioneListiniNomeFile",file.name);refreshListinoInfo();
-    message("importMessage", "Listino " + file.name + ": " + n + " articoli caricati nel nuovo listino. Le colonne riconosciute sono state associate automaticamente.");
+    await addPriceList(file.name,"Excel",rows);const n=rows.length;
+    message("importMessage", "Listino " + file.name + ": " + n + " articoli aggiunti. I listini precedenti restano disponibili; le colonne riconosciute sono state associate automaticamente.");
   } catch(e){message("importMessage","Errore Excel: "+e.message);}
 }
 
@@ -795,15 +865,12 @@ async function readPdf() {
 }
 async function confirmPdfImport() {
   if(!pdfPreviewRows.length)return;
-  if(!confirm("Il nuovo PDF sostituirà il listino attuale. L’archivio articoli e le selezioni salvate resteranno conservati. Procedere?"))return;
+  if(!confirm("Aggiungere questo PDF agli altri listini già caricati? Le selezioni salvate e l’archivio permanente resteranno conservati."))return;
   const file=$("pdfFile").files[0];
   const listinoName=file?file.name:(activeListino&&activeListino.name)||"Listino PDF";
   const rows=pdfPreviewRows.map(a=>({...a}));
-  const n=await replaceActiveArticles(rows);
-  activeListino={name:listinoName,rows:rows,importedAt:new Date().toISOString()};
-  await put("meta",{key:"activeListino",value:activeListino});
-  localStorage.setItem("gestioneListiniNomeFile",listinoName);
-  refreshListinoInfo();
+  await addPriceList(listinoName,"PDF",rows);
+  const n=rows.length;
   renderPdfPreview(rows,listinoName,true);
   $("pdfFile").value="";
   message("pdfMessage",n+" articoli caricati nel nuovo listino. Il listino resta visibile qui sotto.");
@@ -852,22 +919,24 @@ function itemOriginalDetails(item) {
 function buildDocumentHtml() {
   const c = choicePayload();
   let rows = "";
+  const sortedItems=[...c.items].sort((a,b)=>String(a.name||"").localeCompare(String(b.name||""),"it",{sensitivity:"base",numeric:true}));
   const hasMeters = c.items.some(item => !!optionalMeters(item));
-  c.items.forEach(item => {
+  sortedItems.forEach(item => {
     const details = c.includeDetails ? itemOriginalDetails(item) : "";
-    const metersCell = hasMeters ? `<td>${escapeHtml(optionalMeters(item))}</td>` : "";
-    rows += `<tr><td>${escapeHtml(item.name)}${details ? `<br><small>${escapeHtml(details)}</small>` : ""}${item.note ? `<br><small><b>${t("Nota:")}</b> ${escapeHtml(item.note)}</small>` : ""}</td>${metersCell}${c.includePrices ? `<td>${escapeHtml(priceText(item))}</td>` : ""}</tr>`;
+    const metersCell = hasMeters ? `<td class="meters-strong">${escapeHtml(optionalMeters(item))}</td>` : "";
+    rows += `<tr><td><strong>${escapeHtml(item.name)}</strong>${details ? `<br><small>${escapeHtml(details)}</small>` : ""}${item.note ? `<div class="item-note"><b>${t("Nota:")}</b> ${escapeHtml(item.note)}</div>` : ""}</td>${metersCell}${c.includePrices ? `<td>${escapeHtml(priceText(item))}</td>` : ""}</tr>`;
   });
   const title = t("SELEZIONE N.") + " " + (c.number || "—");
   return `<!doctype html><html lang="${currentLanguage}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title>
   <style>
   body{font-family:Arial,sans-serif;padding:24px;color:#222}h1{color:#174f86;font-size:22px;margin:0 0 18px}
   .meta{line-height:1.55}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border:1px solid #ccc;padding:9px;text-align:left;vertical-align:top}
-  th{background:#edf3f8}small{color:#555}.notes{white-space:pre-wrap}
+  th{background:#edf3f8}small{color:#555}.notes{white-space:pre-wrap}.item-note{font-size:1.08rem;font-weight:700;color:#8a3d00;margin-top:7px;white-space:pre-wrap}.meters-strong{font-weight:800;font-size:1.12rem;color:#174f86}
   @media print{body{padding:0}.no-print{display:none!important}}
   </style></head><body>
   <h1>${escapeHtml(title)}</h1>
   <div class="meta"><b>${t("Cliente:")}</b> ${escapeHtml(c.customer)}<br><b>${t("Data:")}</b> ${escapeHtml(c.date)}${c.department ? `<br><b>${t("Reparto:")}</b> ${escapeHtml(c.department)}` : ""}</div>
+  ${currentBusinessCardPhoto ? `<div class="business-card"><h3>Biglietto da visita</h3><img src="${currentBusinessCardPhoto}" alt="Biglietto da visita" style="max-width:100%;max-height:230px;object-fit:contain"></div>` : ""}
   <table><thead><tr><th>${t("Articolo")}</th>${hasMeters ? `<th>Metri</th>` : ""}${c.includePrices ? `<th>${t("Prezzo")}</th>` : ""}</tr></thead><tbody>${rows}</tbody></table>
   ${c.note ? `<h3>${t("Note generali")}</h3><p class="notes">${escapeHtml(c.note)}</p>` : ""}
   </body></html>`;
@@ -890,17 +959,17 @@ async function emailDocument() {
   await ensureSelectionNumber();
   const c = choicePayload();
   const subject = encodeURIComponent(t("Selezione N. ") + c.number + " - " + c.customer);
-  const lines = c.items.map(i => {
+  const lines = [...c.items].sort((a,b)=>String(a.name||"").localeCompare(String(b.name||""),"it",{sensitivity:"base",numeric:true})).map(i => {
     const bits = [i.name];
     const meters = optionalMeters(i);
-    if (meters) bits.push("Metri: " + meters);
+    if (meters) bits.push("  METRI: " + meters);
     if (c.includeDetails) {
       const details = itemOriginalDetails(i);
       if (details) bits.push(details);
     }
     if (c.includePrices) bits.push(priceText(i));
-    if (i.note && i.note.trim()) bits.push(t("Nota:") + " " + i.note.trim());
-    return bits.join(" | ");
+    if (i.note && i.note.trim()) bits.push("  NOTE: " + i.note.trim());
+    return bits.join("\\n");
   });
   const body = encodeURIComponent(
     t("Selezione N. ") + c.number +
@@ -910,6 +979,14 @@ async function emailDocument() {
     (c.note ? "\n\n" + t("Note generali") + ": " + c.note : "") +
     "\n\n" + t("Per allegare il PDF, genera il documento e usa Condividi / Salva PDF.")
   );
+  if(currentBusinessCardPhoto && navigator.share && navigator.canShare){
+    try{
+      const blob=await (await fetch(currentBusinessCardPhoto)).blob();
+      const photoFile=new File([blob],"biglietto-visita-"+(c.customer||"cliente").replace(/[^a-z0-9_-]/gi,"_")+".jpg",{type:blob.type||"image/jpeg"});
+      const shareData={title:t("Selezione N. ")+c.number,text:decodeURIComponent(body),files:[photoFile]};
+      if(navigator.canShare({files:[photoFile]})){await navigator.share(shareData);return;}
+    }catch(e){/* fallback alla bozza email testuale */}
+  }
   window.location.href = "mailto:?subject=" + subject + "&body=" + body;
 }
 
@@ -917,18 +994,21 @@ async function emailDocument() {
 async function exportData() {
   const metaRows = await all("meta");
   const selectionSequences = metaRows.filter(x => String(x.key || "").startsWith("selectionSequence-"));
-  const payload={exportedAt:new Date().toISOString(),articles:await all("articles"),productArchive:await all("productArchive"),choices:await all("choices"),customers:await customersData(),selectionSequences};
+  const payload={exportedAt:new Date().toISOString(),articles:await all("articles"),priceLists:await all("priceLists"),productArchive:await all("productArchive"),choices:await all("choices"),customers:await customersData(),selectionSequences};
   const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"}),url=URL.createObjectURL(blob),a=document.createElement("a");
   a.href=url;a.download="backup-gestione-listini.json";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);message("backupMessage","Backup esportato.");
 }
 async function restoreData() {
   const file=$("restoreFile").files[0];if(!file){alert("Seleziona un file JSON.");return;}
   try{const p=JSON.parse(await file.text());if(Array.isArray(p.articles))await mergeArticles(p.articles);
+    if(Array.isArray(p.priceLists)){for(const list of p.priceLists)if(list&&Array.isArray(list.rows))await put("priceLists",{...list,id:list.id||crypto.randomUUID()});}
+    else if(Array.isArray(p.articles)&&p.articles.length){await put("priceLists",{id:crypto.randomUUID(),name:"Listino importato dal backup",type:"Backup",rows:p.articles,importedAt:new Date().toISOString()});}
+    await put("meta",{key:"priceListsInitialized",value:true});
     if(Array.isArray(p.productArchive))for(const entry of p.productArchive)if(entry.code&&entry.baseName&&entry.variant)await put("productArchive",entry);
     if(Array.isArray(p.choices))for(const c of p.choices)await put("choices",c);
     if(Array.isArray(p.customers))await saveCustomers(p.customers);
     if(Array.isArray(p.selectionSequences))for(const sequence of p.selectionSequences)if(sequence&&String(sequence.key||"").startsWith("selectionSequence-"))await put("meta",sequence);
-    await refreshCustomers();await renderSaved();await renderProductArchive();message("backupMessage","Backup ripristinato. I dati già presenti sono stati conservati.");}
+    await refreshCustomers();await renderSaved();await renderProductArchive();await refreshArticles();await refreshListinoInfo();message("backupMessage","Backup ripristinato. I dati già presenti sono stati conservati.");}
   catch(e){message("backupMessage","Backup non valido: "+e.message);}
 }
 
@@ -954,7 +1034,7 @@ async function unlockApp() {
 }
 async function unlockInterface() {
   $("authGate").classList.add("hidden");$("appShell").classList.remove("hidden");
-  await refreshArticles();await restoreActiveListino();await refreshCustomers();await renderSaved();renderRecentScans();configureIdleLock();
+  await restoreActiveListino();await refreshArticles();await refreshCustomers();await renderSaved();renderRecentScans();configureIdleLock();
 }
 function lockApp() {
   if($("appShell").classList.contains("hidden"))return;
@@ -1268,14 +1348,34 @@ async function saveLanguage() {
 /* EVENTI E AVVIO */
 $("createPassword").onclick=createPassword;$("unlockApp").onclick=unlockApp;
 $("addDepartment").onclick=saveCustomerDepartment;
-$("customer").onchange=async()=>{await refreshDepartments();await renderCustomerMatches();if($("customer").value.trim())message("customerMessage","Controlla i clienti già presenti nell'elenco, se compaiono.");};
-$("customer").oninput=async()=>{await refreshDepartments();await renderCustomerMatches();};
+$("customer").onchange=async()=>{await refreshDepartments();await renderCustomerMatches();await loadCustomerBusinessCard();if($("customer").value.trim())message("customerMessage","Controlla i clienti già presenti nell'elenco, se compaiono.");};
+$("customer").oninput=async()=>{await refreshDepartments();await renderCustomerMatches();await loadCustomerBusinessCard();};
 $("customer").onfocus=renderCustomerMatches;
+$("businessCardPhoto").onchange=async()=>{
+  const file=$("businessCardPhoto").files[0];if(!file)return;
+  if(!file.type.startsWith("image/")){alert("Seleziona un'immagine.");return;}
+  const reader=new FileReader();reader.onload=async()=>{
+    currentBusinessCardPhoto=String(reader.result||"");
+    const name=$("customer").value.trim();
+    if(name){const data=await customersData();let c=data.find(x=>norm(x.name)===norm(name));if(!c){c={name,departments:[]};data.push(c);}c.businessCardPhoto=currentBusinessCardPhoto;await saveCustomers(data);}
+    $("businessCardStatus").textContent="Foto del biglietto salvata per il cliente.";
+  };reader.readAsDataURL(file);
+};
 document.addEventListener("click", event => {
   const matches = $("customerMatches");
   if (matches && !matches.contains(event.target) && event.target !== $("customer")) matches.classList.add("hidden");
 });
 $("search").oninput=renderResults;$("startScan").onclick=startScanner;
+$("toggleBluetoothScanner").onclick=()=>{
+  bluetoothScannerEnabled=!bluetoothScannerEnabled;
+  $("bluetoothScannerInput").classList.toggle("hidden",!bluetoothScannerEnabled);
+  $("toggleBluetoothScanner").textContent=bluetoothScannerEnabled?"Disattiva scanner Bluetooth":"Usa scanner Bluetooth";
+  if(bluetoothScannerEnabled){$("bluetoothScannerInput").focus();message("scanMessage","Scanner Bluetooth attivo: collega il lettore e scansisci il codice.");}
+  else message("scanMessage","Scanner Bluetooth disattivato.");
+};
+$("bluetoothScannerInput").addEventListener("keydown",async e=>{
+  if(e.key==="Enter"){e.preventDefault();const code=$("bluetoothScannerInput").value.trim();$("bluetoothScannerInput").value="";if(code)await onBarcode(code);}
+});
 $("addProductArchiveEntry").onclick=addProductArchiveEntry;
 $("archiveUnknownCode").onclick=()=>{
   $("archiveCode").value=lastUnknownCode||"";
@@ -1292,8 +1392,17 @@ $("importCsv").onclick=importCsv;$("importExcel").onclick=importExcel;$("csvFile
 $("saveChoice").onclick=saveChoice;$("newChoice").onclick=newChoice;$("printDocument").onclick=printDocument;$("emailDocument").onclick=emailDocument;
 $("savedSearch").oninput=renderSaved;
 $("previewClose").onclick=()=>{$("documentPreviewModal").classList.add("hidden");$("documentPreviewModal").setAttribute("aria-hidden","true");};
-$("previewPrint").onclick=()=>{const frame=$("documentPreviewFrame");try{frame.contentWindow.focus();frame.contentWindow.print();}catch(e){message("documentMessage","Impossibile aprire la stampa su questo browser.");}};
+$("previewPrint").onclick=()=>{
+  const docHtml=$("documentPreviewFrame").srcdoc||buildDocumentHtml();
+  try{
+    const w=window.open("","_blank");
+    if(w){w.document.open();w.document.write(docHtml);w.document.close();w.focus();setTimeout(()=>{try{w.print();}catch(e){}},500);}
+    else {const frame=$("documentPreviewFrame");frame.contentWindow.focus();frame.contentWindow.print();}
+  }catch(e){message("documentMessage","Impossibile aprire la stampa. Consenti le finestre a comparsa per questo sito e riprova.");}
+};
 $("exportData").onclick=exportData;$("restoreData").onclick=restoreData;
+$("clearRestoreFile").onclick=()=>{if(!$("restoreFile").files.length)return;if(confirm("Rimuovere il backup selezionato dal modulo? Il file originale sul dispositivo non verrà cancellato.")){$("restoreFile").value="";$("restoreFileName").textContent="Nessun backup selezionato.";}}; 
+$("restoreFile").onchange=()=>{$("restoreFileName").textContent=$("restoreFile").files[0]?"Backup selezionato: "+$("restoreFile").files[0].name:"Nessun backup selezionato.";};
 $("saveSettings").onclick=saveSettings;$("changePassword").onclick=changePassword;$("lockApp").onclick=lockApp;$("language").onchange=saveLanguage;
 window.addEventListener("online",status);window.addEventListener("offline",status);
 ["click","keydown","touchstart","mousemove"].forEach(eventName=>document.addEventListener(eventName,()=>{

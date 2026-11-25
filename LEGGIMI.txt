@@ -1,28 +1,26 @@
-GESTIONE LISTINI IPHONE — REVISIONE 4
+GESTIONE LISTINI IPHONE — REVISIONE 5
 
-BASE
-- Derivata dalla revisione 3 caricata dall’utente.
-- Da pubblicare esclusivamente nel repository gestione-listini-iphone.
-- Non modificare il repository gestione-listini-test né la V.24 stabile.
+Base: ZIP rev4 fornito dall'utente.
+Repository di destinazione: gestione-listini-iphone.
+NON caricare nel repository gestione-listini-test e NON modificare V.24.
 
-MODIFICHE
-1. Archivio articoli permanente separato dal listino attuale, con conservazione su IndexedDB.
-2. In ALTRO è presente il pulsante LISTA ARCHIVIO ARTICOLI.
-3. È possibile aggiungere progressivamente una variante indicando articolo principale, serie/disegno e codice.
-4. Le diciture S.1 e SERIE 1 vengono normalizzate come SERIE 1.
-5. Le varianti archiviate ereditano il prezzo dall’articolo principale nel listino attuale. Se il principale non è nel listino attuale, la variante resta selezionabile e mostra PREZZO ASSENTE.
-6. Ricerca e scanner riconoscono anche i codici presenti nell’archivio permanente.
-7. Importando PDF, Excel o CSV il nuovo listino sostituisce il precedente; archivio permanente e selezioni salvate restano separati.
-8. Backup JSON include anche l’archivio permanente.
-9. Per PDF con dati tabellari sulla stessa riga, il parser conserva i valori successivi al prezzo e li mostra con etichette Composizione, Peso e Altezze. I valori numerici successivi al prezzo sono raccolti nel campo Peso.
-10. Cache aggiornata alla revisione 4.
+Modifiche incluse:
+- Gestione di più listini PDF/Excel/CSV contemporaneamente, con cancellazione individuale.
+- Archivio articoli permanente separato dai listini e backup JSON esteso ai listini.
+- Apertura selezione da ARCHIVIO con passaggio automatico a LAVORO.
+- Articoli selezionati spostati subito sotto i controlli scanner.
+- Lista di lavoro mantiene l'ordine di inserimento; PDF ed email ordinati alfabeticamente.
+- Note e metraggio più evidenti nel PDF; metraggio e note su righe separate nell'email.
+- Stampa PDF apre una finestra documento autonoma per invocare la finestra di stampa/condivisione iOS.
+- Scanner Bluetooth HID selezionabile in aggiunta alla fotocamera.
+- Foto biglietto da visita facoltativa associata al cliente; inserita nel PDF e condivisibile come immagine quando il browser supporta la condivisione file.
+- Possibilità di rimuovere il backup selezionato dal modulo (non cancella il file originale dal dispositivo).
+- La cancellazione di un listino non elimina selezioni salvate, archivio articoli permanente o altri listini.
 
-DA PROVARE
-- Aggiungere SPRINT / S.1 / codice e poi SPRINT / SERIE 2 / codice.
-- Caricare un listino con SPRINT e verificare che le due varianti mostrino il prezzo SPRINT.
-- Caricare un nuovo listino senza SPRINT e verificare PREZZO ASSENTE, mantenendo selezionabili le varianti.
-- Verificare import Excel e PDF reali, soprattutto la corrispondenza dei campi Peso e Altezze.
-- Verificare backup e ripristino su un dispositivo di prova.
+ATTENZIONE:
+- L'invio di un PDF dipende dal menu di stampa/condivisione nativo del browser e dal supporto del dispositivo.
+- La foto biglietto viene incorporata nel PDF. Nella funzione email, se il browser supporta Web Share con file, viene proposta come immagine condivisibile; altrimenti resta disponibile la bozza email testuale.
+- I codici presenti in più listini con prezzi o descrizioni differenti vengono mostrati come scelte distinte; durante scansione viene chiesto di scegliere dall'elenco per evitare di applicare un prezzo ambiguo.
 
-INSTALLAZIONE
-Caricare il contenuto dello ZIP nel repository separato gestione-listini-iphone. Non caricarlo nel repository gestione-listini-test.
+Installazione:
+Caricare i file contenuti nello ZIP nel repository separato gestione-listini-iphone.
