@@ -3,7 +3,7 @@
 const DB_NAME = "gestione-listini-offline";
 const DB_VERSION = 3;
 let db, articles = [], currentItems = [], currentChoiceId = null;
-let scanner = null, lastScan = "", pdfPreviewRows = [], activeListino = null, idleTimer = null, lastUnknownCode = "";
+let scanner = null, lastScan = "", pdfPreviewRows = [], activeListino = null, idleTimer = null, lastUnknownCode = "", preparedPdfFile = null;
 let currentLanguage = "it";
 let currentBusinessCardPhoto = "";
 let bluetoothScannerEnabled = false;
@@ -948,43 +948,68 @@ async function printDocument() {
   if (!currentItems.length) { alert(t("Aggiungi almeno un articolo.")); return; }
   if (!$("customer").value.trim()) { alert(t("Seleziona prima il cliente.")); $("customer").focus(); return; }
   await ensureSelectionNumber();
-  $("documentPreviewFrame").srcdoc = buildDocumentHtml();
+  const frame=$("documentPreviewFrame");
+  preparedPdfFile=null;
+  $("previewPrint").disabled=true;
+  $("previewPrint").textContent="Preparazione PDF…";
+  frame.srcdoc = buildDocumentHtml();
   $("documentPreviewModal").classList.remove("hidden");
   $("documentPreviewModal").setAttribute("aria-hidden","false");
+  try {
+    await new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>reject(new Error("Anteprima non pronta")),10000);
+      frame.onload=()=>{clearTimeout(timer);resolve();};
+    });
+    if(!window.html2pdf) throw new Error("Motore PDF non disponibile: verifica la connessione internet e riapri l'app.");
+    const blob=await html2pdf().set({
+      margin:[8,8,8,8],
+      filename:"Selezione-"+(choicePayload().number||"documento")+".pdf",
+      image:{type:"jpeg",quality:0.96},
+      html2canvas:{scale:2,useCORS:true,backgroundColor:"#ffffff",logging:false},
+      jsPDF:{unit:"mm",format:"a4",orientation:"portrait"},
+      pagebreak:{mode:["css","legacy"]}
+    }).from(frame.contentDocument.body).outputPdf("blob");
+    const c=choicePayload();
+    preparedPdfFile=new File([blob],"Selezione-"+(c.number||"documento")+".pdf",{type:"application/pdf"});
+    $("previewPrint").textContent="Condividi PDF";
+  } catch(e) {
+    console.error("Preparazione PDF per condivisione:",e);
+    $("previewPrint").textContent="Stampa / Salva PDF";
+    message("documentMessage","Non è stato possibile preparare il PDF per la condivisione. Puoi comunque provare la stampa.");
+  } finally { $("previewPrint").disabled=false; }
 }
 
 
 async function emailDocument() {
   if (!currentItems.length) { alert(t("Aggiungi almeno un articolo.")); return; }
   if (!$("customer").value.trim()) { alert(t("Seleziona prima il cliente.")); $("customer").focus(); return; }
-  const mailWindow=window.open("about:blank","_blank");
   await ensureSelectionNumber();
   const c = choicePayload();
   const subject = encodeURIComponent(t("Selezione N. ") + c.number + " - " + c.customer);
   const lines = [...c.items].sort((a,b)=>String(a.name||"").localeCompare(String(b.name||""),"it",{sensitivity:"base",numeric:true})).map(i => {
-    const bits = [i.name];
-    const meters = optionalMeters(i);
-    if (meters) bits.push("  METRI: " + meters);
+    const bits = [String(i.name || "").trim()];
     if (c.includeDetails) {
       const details = itemOriginalDetails(i);
-      if (details) bits.push(details);
+      if (details) bits.push(details.trim());
     }
+    const meters = optionalMeters(i);
+    if (meters) bits.push("METRI: " + meters);
     if (c.includePrices) bits.push(priceText(i));
-    if (i.note && i.note.trim()) bits.push("  NOTE: " + i.note.trim());
-    return bits.join("\n");
+    if (i.note && i.note.trim()) bits.push("NOTE: " + i.note.trim());
+    return bits.filter(Boolean).join("\n");
   });
   const body = encodeURIComponent(
     t("Selezione N. ") + c.number +
     "\n" + t("Cliente:") + " " + c.customer +
     (c.department ? "\n" + t("Reparto:") + " " + c.department : "") +
-    "\n" + t("Data:") + " " + c.date + "\n\n" + t("Articoli:") + "\n" + lines.join("\n") +
-    (c.note ? "\n\n" + t("Note generali") + ": " + c.note : "") +
+    "\n" + t("Data:") + " " + c.date + "\n\n" + t("Articoli:") + "\n\n" + lines.join("\n\n") +
+    (c.note ? "\n\nNOTE GENERALI:\n" + c.note.trim() : "") +
     "\n\n" + t("Per allegare il PDF, genera il documento e usa Condividi / Salva PDF.")
   );
   const mailto="mailto:?subject=" + subject + "&body=" + body;
-  if(mailWindow){mailWindow.location.href=mailto;}else{window.location.href=mailto;}
+  // Usa direttamente il link mailto, evitando la finestra about:blank che rimane aperta al rientro su iOS.
+  window.location.href=mailto;
 }
-
 
 async function exportData() {
   const metaRows = await all("meta");
@@ -1398,13 +1423,27 @@ $("importCsv").onclick=importCsv;$("importExcel").onclick=importExcel;$("csvFile
 $("saveChoice").onclick=saveChoice;$("newChoice").onclick=newChoice;$("printDocument").onclick=printDocument;$("emailDocument").onclick=emailDocument;
 $("savedSearch").oninput=renderSaved;
 $("previewClose").onclick=()=>{$("documentPreviewModal").classList.add("hidden");$("documentPreviewModal").setAttribute("aria-hidden","true");};
-$("previewPrint").onclick=()=>{
+$("previewPrint").onclick=async()=>{
   try{
+    if(preparedPdfFile && navigator.canShare && navigator.canShare({files:[preparedPdfFile]}) && navigator.share){
+      await navigator.share({files:[preparedPdfFile],title:preparedPdfFile.name});
+      return;
+    }
+    if(preparedPdfFile){
+      const url=URL.createObjectURL(preparedPdfFile);
+      const a=document.createElement("a");a.href=url;a.download=preparedPdfFile.name;a.rel="noopener";document.body.appendChild(a);a.click();a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),60000);
+      message("documentMessage","Il PDF è stato preparato. Se la condivisione diretta non è supportata, il file viene salvato per poterlo allegare.");
+      return;
+    }
     const frame=$("documentPreviewFrame");
     if(!frame.contentWindow)throw new Error("Anteprima non disponibile");
-    frame.contentWindow.focus();
-    frame.contentWindow.print();
-  }catch(e){message("documentMessage","Impossibile aprire la stampa. Riprova dal pulsante Genera PDF / Stampa.");}
+    frame.contentWindow.focus();frame.contentWindow.print();
+  }catch(e){
+    if(e && e.name==="AbortError")return;
+    console.error("Condivisione PDF:",e);
+    message("documentMessage","Condivisione non riuscita. Riprova oppure usa Stampa / Salva PDF.");
+  }
 };
 $("exportData").onclick=exportData;$("restoreData").onclick=restoreData;
 $("clearRestoreFile").onclick=()=>{if(!$("restoreFile").files.length)return;if(confirm("Rimuovere il backup selezionato dal modulo? Il file originale sul dispositivo non verrà cancellato.")){$("restoreFile").value="";$("restoreFileName").textContent="Nessun backup selezionato.";}}; 
