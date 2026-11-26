@@ -961,16 +961,41 @@ async function printDocument() {
       frame.onload=()=>{clearTimeout(timer);resolve();};
     });
     if(!window.html2pdf) throw new Error("Motore PDF non disponibile: verifica la connessione internet e riapri l'app.");
-    const blob=await html2pdf().set({
-      margin:[8,8,8,8],
-      filename:"Selezione-"+(choicePayload().number||"documento")+".pdf",
-      image:{type:"jpeg",quality:0.96},
-      html2canvas:{scale:2,useCORS:true,backgroundColor:"#ffffff",logging:false},
-      jsPDF:{unit:"mm",format:"a4",orientation:"portrait"},
-      pagebreak:{mode:["css","legacy"]}
-    }).from(frame.contentDocument.body).outputPdf("blob");
-    const c=choicePayload();
-    preparedPdfFile=new File([blob],"Selezione-"+(c.number||"documento")+".pdf",{type:"application/pdf"});
+    const sourceDoc=frame.contentDocument;
+    if(!sourceDoc || !sourceDoc.body || !sourceDoc.body.innerText.trim()) throw new Error("Il documento dell'anteprima è vuoto.");
+    // Attende font e immagini (incluso il biglietto da visita) prima di acquisire il documento.
+    if(sourceDoc.fonts && sourceDoc.fonts.ready) await sourceDoc.fonts.ready;
+    await Promise.all(Array.from(sourceDoc.images||[]).map(img=>{
+      if(img.complete && img.naturalWidth>0) return Promise.resolve();
+      return new Promise(resolve=>{img.onload=resolve;img.onerror=resolve;setTimeout(resolve,8000);});
+    }));
+    // html2pdf acquisisce un nodo del documento principale: clonare il contenuto
+    // dell'iframe evita che su iOS venga rasterizzato soltanto il titolo.
+    const exportRoot=document.createElement("div");
+    exportRoot.style.cssText="position:fixed;left:-12000px;top:0;width:794px;background:#fff;color:#222;z-index:-1;";
+    sourceDoc.querySelectorAll("style,link[rel='stylesheet']").forEach(node=>{
+      if(node.tagName==="STYLE") exportRoot.appendChild(node.cloneNode(true));
+    });
+    const exportBody=document.createElement("div");
+    exportBody.innerHTML=sourceDoc.body.innerHTML;
+    exportBody.style.cssText="width:100%;background:#fff;";
+    exportRoot.appendChild(exportBody);
+    document.body.appendChild(exportRoot);
+    try {
+      const worker=html2pdf().set({
+        margin:[8,8,8,8],
+        filename:"Selezione-"+(choicePayload().number||"documento")+".pdf",
+        image:{type:"jpeg",quality:0.96},
+        html2canvas:{scale:2,useCORS:true,backgroundColor:"#ffffff",logging:false,windowWidth:794,scrollY:0},
+        jsPDF:{unit:"mm",format:"a4",orientation:"portrait"},
+        pagebreak:{mode:["css","legacy"]}
+      }).from(exportBody).toPdf();
+      const pdf=await worker.get("pdf");
+      const blob=pdf.output("blob");
+      if(!blob || blob.size<1500 || blob.type!=="application/pdf") throw new Error("Il PDF generato è incompleto.");
+      const c=choicePayload();
+      preparedPdfFile=new File([blob],"Selezione-"+(c.number||"documento")+".pdf",{type:"application/pdf"});
+    } finally { exportRoot.remove(); }
     $("previewPrint").textContent="Condividi PDF";
   } catch(e) {
     console.error("Preparazione PDF per condivisione:",e);
