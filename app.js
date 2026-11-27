@@ -325,7 +325,7 @@ function renderChoice() {
   });
   const host = $("choiceItems"); host.replaceChildren();
   if (!currentItems.length) { host.textContent = t("Nessun articolo selezionato."); renderRecentScans(); applyLanguage(); return; }
-  currentItems.forEach((item,index) => {
+  [...currentItems].reverse().forEach((item) => {
     const div = document.createElement("div"); div.className = "item";
     const name = document.createElement("strong"); name.textContent = item.name;
     const details = document.createElement("div"); details.className = "muted";
@@ -338,7 +338,9 @@ function renderChoice() {
     qty.onchange = () => { item.quantity = qty.value.trim(); item.quantitySet = !!item.quantity; autosaveDraft(); };
     const remove = document.createElement("button"); remove.className = "danger"; remove.textContent = "Rimuovi";
     remove.onclick = () => {
-      const removed = currentItems[index]; currentItems.splice(index,1);
+      const itemIndex = currentItems.indexOf(item);
+      if (itemIndex < 0) return;
+      const removed = currentItems[itemIndex]; currentItems.splice(itemIndex,1);
       recentScans = recentScans.filter(x => !(x.code && removed.code && codeKey(x.code) === codeKey(removed.code)));
       renderChoice(); autosaveDraft(); renderRecentScans();
     };
@@ -937,7 +939,7 @@ function buildDocumentHtml() {
   </style></head><body>
   <h1>${escapeHtml(title)}</h1>
   <div class="meta"><b>${t("Cliente:")}</b> ${escapeHtml(c.customer)}<br><b>${t("Data:")}</b> ${escapeHtml(c.date)}${c.department ? `<br><b>${t("Reparto:")}</b> ${escapeHtml(c.department)}` : ""}</div>
-  ${currentBusinessCardPhoto ? `<div class="business-card"><h3>Biglietto da visita</h3><img src="${currentBusinessCardPhoto}" alt="Biglietto da visita" style="max-width:100%;max-height:230px;object-fit:contain"></div>` : ""}
+  ${currentBusinessCardPhoto ? `<div class="business-card"><img src="${currentBusinessCardPhoto}" alt="Biglietto da visita" style="max-width:100%;max-height:230px;object-fit:contain"></div>` : ""}
   <table><thead><tr><th>${t("Articolo")}</th>${hasMeters ? `<th>Metri</th>` : ""}${c.includePrices ? `<th>${t("Prezzo")}</th>` : ""}</tr></thead><tbody>${rows}</tbody></table>
   ${c.note ? `<h3>${t("Note generali")}</h3><p class="notes">${escapeHtml(c.note)}</p>` : ""}
   </body></html>`;
@@ -1012,24 +1014,22 @@ async function emailDocument() {
   const c = choicePayload();
   const subject = encodeURIComponent(t("Selezione N. ") + c.number + " - " + c.customer);
   const lines = [...c.items].sort((a,b)=>String(a.name||"").localeCompare(String(b.name||""),"it",{sensitivity:"base",numeric:true})).map(i => {
-    const bits = [String(i.name || "").trim()];
+    const meters = optionalMeters(i);
+    const bits = [String(i.name || "").trim() + (meters ? "   METRI: " + meters : "")];
     if (c.includeDetails) {
       const details = itemOriginalDetails(i);
       if (details) bits.push(details.trim());
     }
-    const meters = optionalMeters(i);
-    if (meters) bits.push("METRI: " + meters);
     if (c.includePrices) bits.push(priceText(i));
     if (i.note && i.note.trim()) bits.push("NOTE: " + i.note.trim());
-    return bits.filter(Boolean).join("\n");
+    return bits.filter(Boolean).join("\\n");
   });
   const body = encodeURIComponent(
     t("Selezione N. ") + c.number +
     "\n" + t("Cliente:") + " " + c.customer +
     (c.department ? "\n" + t("Reparto:") + " " + c.department : "") +
     "\n" + t("Data:") + " " + c.date + "\n\n" + t("Articoli:") + "\n\n" + lines.join("\n\n") +
-    (c.note ? "\n\nNOTE GENERALI:\n" + c.note.trim() : "") +
-    "\n\n" + t("Per allegare il PDF, genera il documento e usa Condividi / Salva PDF.")
+    (c.note ? "\n\nNOTE GENERALI:\n" + c.note.trim() : "")
   );
   const mailto="mailto:?subject=" + subject + "&body=" + body;
   // Usa direttamente il link mailto, evitando la finestra about:blank che rimane aperta al rientro su iOS.
